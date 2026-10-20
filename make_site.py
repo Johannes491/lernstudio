@@ -20,6 +20,7 @@ CSP = (
     "img-src 'self' data: blob:; "
     "style-src 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src https://fonts.gstatic.com data:; "
+    "manifest-src 'self'; "
     "base-uri 'none'; form-action 'none'"
 )
 
@@ -69,6 +70,13 @@ head = f"""<!doctype html>
 <meta name="referrer" content="no-referrer">
 <meta name="description" content="Aus Vorlesungsfolien werden Anki-Karteikarten und Übungsquizze, mit deinem eigenen Claude-API-Schlüssel.">
 <title>Vorlesungs-Lernstudio</title>
+<meta name="theme-color" content="#2446A6">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://api.anthropic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
 {fonts}{style}
 </head>
 <body>
@@ -126,8 +134,9 @@ const MODELS = { complex: 'claude-opus-5-5', default: 'claude-sonnet-5-5' };
 const PRICES = { 'claude-opus-5-5': [4, 20], 'claude-sonnet-5-5': [2, 10], 'claude-opus-5': [5, 25], 'claude-opus-4-8': [5, 25], 'claude-sonnet-5': [2, 10] };
 const caps = { imageMax: 8 };
 const usage = { cost: 0 };
-// Requests run in parallel; the SDK retries rate limits and overloads on its own.
-const POOL = 4;
+// Over the API every section of a typical lecture can run at once; the SDK waits and retries
+// on rate limits and overloads by itself (new accounts start with lower limits).
+const POOL = 8;
 // Card writing is extraction, so little thinking is needed; checks and distractors get a bit more.
 const EFFORT = { cards: 'low', coverage: 'medium', quiz: 'medium', grade: 'low' };
 const FATAL = new Set(['no_key', 'auth', 'permission', 'spend_cap', 'billing', 'model']);
@@ -184,7 +193,7 @@ async function getClient() {
   const key = readKey();
   if (!key) throw { code: 'no_key' };
   await loadSdk();
-  if (!client || clientKey !== key) { client = newClient(key, 2); clientKey = key; }
+  if (!client || clientKey !== key) { client = newClient(key, 3); clientKey = key; }
   return client;
 }
 // Maps SDK errors to the codes the page shows; most specific class first.
@@ -383,6 +392,37 @@ body = replace(body, "function bind() {\n", """function bind() {
 
 if "caps.sample" in body or "caps.downloads" in body or "claude.ai" in body:
     sys.exit("make_site: claude.ai runtime code left in the site")
+
+# ---------- app icon and manifest (installable on phones) ----------
+ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<rect width="512" height="512" rx="112" fill="#2446A6"/>
+<rect x="122" y="150" width="300" height="212" rx="14" fill="#C9D3EC"/>
+<rect x="96" y="128" width="300" height="212" rx="14" fill="#FFFFFF"/>
+<rect x="96" y="180" width="300" height="8" fill="#CF5547"/>
+<g fill="#D3DEF0"><rect x="120" y="222" width="252" height="5"/><rect x="120" y="256" width="252" height="5"/><rect x="120" y="290" width="200" height="5"/></g>
+</svg>
+"""
+MANIFEST = {
+    "name": "Vorlesungs-Lernstudio",
+    "short_name": "Lernstudio",
+    "description": "Aus Vorlesungsfolien werden Anki-Karteikarten und Übungsquizze.",
+    "lang": "de",
+    "start_url": "./",
+    "scope": "./",
+    "display": "standalone",
+    "background_color": "#EEF1F5",
+    "theme_color": "#2446A6",
+    "icons": [
+        {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml"},
+        {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+        {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+    ],
+}
+import json
+(HERE / "docs").mkdir(exist_ok=True)
+(HERE / "docs" / "icon.svg").write_text(ICON_SVG, encoding="utf-8")
+(HERE / "docs" / "manifest.webmanifest").write_text(json.dumps(MANIFEST, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+# The PNG icons (icon-192.png, icon-512.png, apple-touch-icon.png) are rendered from icon.svg once and kept in docs/.
 
 out = HERE / "docs" / "index.html"
 out.parent.mkdir(exist_ok=True)

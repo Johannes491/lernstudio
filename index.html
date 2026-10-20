@@ -409,14 +409,15 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 (() => {
 'use strict';
 
 /* ---------- Basics ---------- */
+// Libraries load when first needed (and in idle time), so the page itself opens faster.
 const CDN = {
+  jszip: 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
+  pdf: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   pdfWorker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
   sql: 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-asm.js',
 };
@@ -617,6 +618,7 @@ function splitText(text, base) {
   return out.map((t, i) => ({ kind: base, num: i + 1, label: base + ' ' + (i + 1), text: t }));
 }
 async function parsePdf(file, entry) {
+  await loadScript(CDN.pdf);
   await loadScript(CDN.pdfWorker);
   if (!window.pdfjsLib) throw new Error('Der PDF-Leser konnte nicht geladen werden.');
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = CDN.pdfWorker;
@@ -651,6 +653,7 @@ function relsMap(xml, basePath) {
   return m;
 }
 async function parsePptx(file) {
+  await loadScript(CDN.jszip);
   const zip = await window.JSZip.loadAsync(file);
   let order = [];
   try {
@@ -682,6 +685,7 @@ async function parsePptx(file) {
   return units;
 }
 async function parseDocx(file) {
+  await loadScript(CDN.jszip);
   const zip = await window.JSZip.loadAsync(file);
   const f = zip.file('word/document.xml');
   if (!f) throw new Error('Diese Word-Datei konnte nicht gelesen werden.');
@@ -785,7 +789,7 @@ function unitText(u) {
   const b = boilerplate(u.fileId);
   return b.size ? u.text.split('\n').filter(l => !b.has(l.trim())).join('\n').trim() : u.text;
 }
-function resetMaterialCaches() { boilerCache.clear(); slideCache.clear(); }
+function resetMaterialCaches() { boilerCache.clear(); slideCache.clear(); claudeCache.clear(); }
 function usableUnits(withImages) {
   return state.units.filter(u => unitText(u).length >= 3 || (withImages && pdfDocs.has(u.fileId)));
 }
@@ -825,6 +829,22 @@ function renderSlide(fileId, num) {
   const key = fileId + ':' + num;
   if (!slideCache.has(key)) slideCache.set(key, drawSlide(fileId, num, 1100).catch(() => { slideCache.delete(key); return null; }));
   return slideCache.get(key);
+}
+// Claude gets a smaller copy (960 px wide, about a quarter fewer image tokens); Anki keeps the sharper one.
+const claudeCache = new Map();
+function claudeSlide(fileId, num) {
+  const key = fileId + ':' + num;
+  if (!claudeCache.has(key)) claudeCache.set(key, renderSlide(fileId, num).then(b => b && shrinkJpeg(b, 960)).catch(() => { claudeCache.delete(key); return null; }));
+  return claudeCache.get(key);
+}
+async function shrinkJpeg(blob, width) {
+  const bmp = await createImageBitmap(blob);
+  if (bmp.width <= width) { bmp.close(); return blob; }
+  const c = document.createElement('canvas');
+  c.width = width; c.height = Math.round(bmp.height * width / bmp.width);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close();
+  return new Promise(res => c.toBlob(res, 'image/jpeg', 0.8));
 }
 async function drawSlide(fileId, num, width) {
   const doc = pdfDocs.get(fileId);
@@ -1055,7 +1075,7 @@ function renderProgress(listSel, jobs, onRetry) {
     j.status === 'fehler' ? el('span', { class: 'perr' }, j.err + ' ', el('button', { type: 'button', class: 'btn small', onclick: () => onRetry(j) }, 'Erneut versuchen')) : null)));
 }
 async function chunkImages(chunk) {
-  const blobs = await Promise.all(chunk.units.map(u => renderSlide(u.fileId, u.num)));
+  const blobs = await Promise.all(chunk.units.map(u => claudeSlide(u.fileId, u.num)));
   return blobs.every(Boolean) ? blobs : null;
 }
 // Streaming adds cards several times a second; the deck view redraws at most every 300 ms.
@@ -1119,7 +1139,7 @@ async function generateCards() {
   cardJobs = chunks.map((chunk, idx) => ({ kind: 'gen', key: 'g' + idx + '-' + t0, chunk, idx, label: chunkLabel(chunk), status: 'wartet', opts: o }));
   paintCardProgress(); setCardBusy(true); prefetchExportLib();
   // Render slide images in chunk order in the background, so the first chunk's images are ready first.
-  if (o.images) (async () => { for (const c of chunks) for (const u of c.units) await renderSlide(u.fileId, u.num); })();
+  if (o.images) (async () => { for (const c of chunks) for (const u of c.units) await claudeSlide(u.fileId, u.num); })();
   await runPool(cardJobs, POOL, cardCtl.signal, job => runCardJob(job, chunks.length, o));
   paintCardProgress();
   const failed = cardJobs.filter(j => j.status !== 'fertig').length;
@@ -1416,6 +1436,7 @@ async function packageApkg({ deckName, cards, tags, withImages, onStep }) {
   }
   if (onStep) onStep('Anki-Datei wird gebaut …');
   const col = await buildApkg({ deckName, cards, tags, images });
+  await loadScript(CDN.jszip);
   const zip = new window.JSZip();
   zip.file('collection.anki2', col);
   const mediaMap = {};
@@ -2021,7 +2042,7 @@ function init() {
   updateImageOptions();
   initCaps();
   // Load the PDF reader while the page sits idle, so the first upload is read right away.
-  idle(() => loadScript(CDN.pdfWorker).catch(() => {}));
+  idle(() => loadScript(CDN.pdf).then(() => loadScript(CDN.pdfWorker)).then(() => loadScript(CDN.jszip)).catch(() => {}));
   if (state.cards.length) prefetchExportLib();
 }
 window.lernstudio = { state, addFiles, unitText, buildApkg, packageApkg, makeChunks, normalizeCards, normalizeQuestions, cardPrompt, quizPrompt, autoScore };
