@@ -1,0 +1,2208 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; connect-src https://api.anthropic.com; img-src 'self' data: blob:; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="description" content="Aus Vorlesungsfolien werden Anki-Karteikarten und Übungsquizze, mit deinem eigenen Claude-API-Schlüssel.">
+<title>Vorlesungs-Lernstudio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap">
+<style>
+html{-webkit-text-size-adjust:100%}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+a{color:var(--accent)}
+.keybox{margin-bottom:20px}
+.keybox > * + *{margin-top:12px}
+.steps{margin:0;padding-left:1.3em;display:grid;gap:4px;max-width:72ch}
+.key-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.key-field{flex:1 1 280px;min-width:0}
+.key-field input{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--f-mono);font-size:14px}
+.key-ready{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;justify-content:space-between}
+.foot{margin-top:28px;color:var(--muted);font-size:13px;max-width:80ch}
+/* Layout: material tray on the left, the active tool on the right; stacks to one column below 900px */
+:root{
+  --bg:#EEF1F5; --surface:#FFFFFF; --surface-2:#E5EAF1; --ink:#16202E; --muted:#56637A; --line:#D0D8E3;
+  --accent:#2446A6; --accent-ink:#FFFFFF; --accent-soft:#DFE6F7;
+  --card-rule:#CF5547; --card-line:#D3DEF0;
+  --ok:#1C7246; --ok-soft:#DCF0E3; --bad:#B0392D; --bad-soft:#F7E0DC; --warn:#865700; --warn-soft:#F7ECCD;
+  --f-display:"Source Serif 4",Georgia,"Times New Roman",serif;
+  --f-body:"Source Sans 3",-apple-system,"Segoe UI",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10141B; --surface:#171D27; --surface-2:#212937; --ink:#E5E9F0; --muted:#9AA5B8; --line:#2D3747;
+  --accent:#8FA9F4; --accent-ink:#0E1424; --accent-soft:#22304F;
+  --card-rule:#E06C5E; --card-line:#263247;
+  --ok:#5DC48D; --ok-soft:#163226; --bad:#F08B7F; --bad-soft:#3A1F1C; --warn:#E2B54E; --warn-soft:#382E16;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#10141B; --surface:#171D27; --surface-2:#212937; --ink:#E5E9F0; --muted:#9AA5B8; --line:#2D3747;
+  --accent:#8FA9F4; --accent-ink:#0E1424; --accent-soft:#22304F;
+  --card-rule:#E06C5E; --card-line:#263247;
+  --ok:#5DC48D; --ok-soft:#163226; --bad:#F08B7F; --bad-soft:#3A1F1C; --warn:#E2B54E; --warn-soft:#382E16;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15.5px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.app{max-width:1180px;margin:0 auto;padding-block:20px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3{font-family:var(--f-display);font-weight:700;margin:0;text-wrap:balance;letter-spacing:-.005em}
+h1{font-size:clamp(24px,3.4vw,32px);line-height:1.15}
+h2{font-size:20px;line-height:1.25}
+h3{font-size:16px}
+p{margin:0}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--f-mono);font-size:12.5px;font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+
+/* Header */
+.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px 24px;margin-bottom:20px}
+.brand{display:flex;gap:14px;align-items:center;min-width:0}
+.brand-mark{width:44px;height:32px;flex:none;border-radius:4px;background:var(--surface);border:1px solid var(--line);
+  background-image:linear-gradient(to bottom,transparent 9px,var(--card-rule) 9px,var(--card-rule) 11px,transparent 11px),repeating-linear-gradient(to bottom,transparent 0 16px,var(--card-line) 16px 17px);
+  box-shadow:4px 4px 0 -1px var(--surface-2),4px 4px 0 0 var(--line)}
+.sub{color:var(--muted);font-size:15px;margin-top:2px}
+.tabs{display:inline-flex;background:var(--surface-2);border-radius:10px;padding:4px;gap:4px}
+.tabs button{border:0;background:transparent;padding:8px 18px;border-radius:7px;font-weight:600;cursor:pointer;color:var(--muted)}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+
+.notice{border:1px solid var(--warn);background:var(--warn-soft);color:var(--ink);border-radius:var(--r);padding:12px 16px;margin-bottom:16px}
+
+.layout{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:900px){.layout{grid-template-columns:minmax(0,1fr)}}
+.stack{display:grid;gap:20px;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px;min-width:0}
+.panel > * + *{margin-top:14px}
+.panel-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 16px}
+@media (min-width:901px){.material{position:sticky;top:calc(env(safe-area-inset-top,0px) + 16px)}}
+
+/* Forms */
+label{display:block}
+.lbl{display:block;font-weight:600;font-size:13.5px;margin-bottom:4px}
+input[type=text],input[type=search],input[type=number],select,textarea{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+textarea{resize:vertical;line-height:1.45}
+input::placeholder,textarea::placeholder{color:var(--muted);opacity:.8}
+fieldset{border:0;padding:0;margin:0;min-width:0}
+legend{font-weight:600;font-size:13.5px;padding:0;margin-bottom:6px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px 18px}
+.choice{display:flex;gap:9px;align-items:flex-start;padding:4px 0;cursor:pointer}
+.choice input{margin-top:4px;flex:none;accent-color:var(--accent)}
+.choice small{display:block;color:var(--muted);font-size:13px;line-height:1.35}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg label{position:relative}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg span{display:block;padding:6px 12px;border:1px solid var(--line);border-radius:999px;cursor:pointer;font-size:14px}
+.seg input:checked + span{background:var(--accent-soft);border-color:var(--accent);color:var(--ink);font-weight:600}
+.seg input:focus-visible + span{outline:2px solid var(--accent);outline-offset:2px}
+.hint{color:var(--muted);font-size:13.5px}
+details.method{font-size:14px;color:var(--muted)}
+details.method summary{cursor:pointer;font-weight:600;color:var(--ink)}
+details.method p{margin-top:6px;max-width:68ch}
+
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:8px 14px;font-weight:600;font-size:14.5px;cursor:pointer;line-height:1.2}
+.btn:hover{border-color:var(--accent)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.small{padding:5px 10px;font-size:13px}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.btn.ghost:hover{color:var(--ink);border-color:var(--line)}
+.btn.danger{color:var(--bad)}
+.btn[data-armed]{background:var(--bad);border-color:var(--bad);color:#fff}
+.actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+
+/* Material */
+.drop{position:relative;border:1.5px dashed var(--line);border-radius:var(--r);padding:18px 14px;text-align:center;cursor:pointer;background:var(--bg)}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+.drop-title{display:block;font-weight:600}
+.drop-hint{display:block;color:var(--muted);font-size:13px}
+.file-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.file{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 8px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:8px}
+.file-name{font-weight:600;overflow-wrap:anywhere;font-size:14px}
+.file-meta{grid-column:1;font-size:12.5px;color:var(--muted)}
+.file-meta.err{color:var(--bad)}
+.file-meta.warn{color:var(--warn)}
+.file .btn{grid-row:1 / span 2;grid-column:2}
+.mat-summary{font-size:13.5px;color:var(--muted)}
+
+/* Progress */
+.progress{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.progress:empty{display:none}
+.prow{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:7px 10px;border-radius:8px;background:var(--bg);font-size:14px}
+.prow .dot{width:10px;height:10px;border-radius:50%;background:var(--line);justify-self:center}
+.prow[data-s="läuft"] .dot{background:var(--accent);animation:pulse 1.1s ease-in-out infinite}
+.prow[data-s="fertig"] .dot{background:var(--ok)}
+.prow[data-s="fehler"] .dot{background:var(--bad)}
+.prow[data-s="abgebrochen"] .dot{background:var(--muted)}
+.prow .perr{grid-column:2 / span 2;color:var(--bad);font-size:13px}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.prow[data-s="läuft"] .dot{animation:none}}
+
+/* Deck */
+.stats{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13.5px;color:var(--muted)}
+.stats b{color:var(--ink);font-variant-numeric:tabular-nums}
+.cov{display:grid;gap:10px}
+.cov-file{display:grid;gap:5px}
+.cov-label{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.cells{display:flex;flex-wrap:wrap;gap:3px}
+.cell{width:15px;height:21px;border-radius:2px;border:1px solid var(--line);background:var(--surface-2);padding:0;cursor:pointer}
+.cell.has{background:var(--accent);border-color:var(--accent)}
+.cell.miss{background:var(--warn-soft);border-color:var(--warn)}
+.cell.empty{opacity:.4;cursor:default}
+.cell.sel{outline:2px solid var(--ink);outline-offset:1px}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:13px;border-radius:2px;border:1px solid var(--line);vertical-align:-2px;margin-right:4px}
+.legend i.has{background:var(--accent);border-color:var(--accent)}
+.legend i.miss{background:var(--warn-soft);border-color:var(--warn)}
+.deck-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.deck-tools input[type=search]{flex:1 1 200px;width:auto}
+.filter-note{font-size:13.5px;color:var(--muted)}
+.card-list{display:grid;gap:12px}
+.icard{border:1px solid var(--line);border-radius:6px;background:var(--surface);overflow:hidden}
+.icard-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 12px 0}
+.chip{display:inline-block;font-family:var(--f-mono);font-size:11.5px;padding:2px 7px;border-radius:4px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
+.chip.type{background:var(--accent-soft);color:var(--ink)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.new{background:var(--ok-soft);color:var(--ok)}
+.chip.example{background:var(--ink);color:var(--surface)}
+.topic{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.icard-front{padding:8px 14px 9px;font-weight:600;border-bottom:2px solid var(--card-rule);overflow-wrap:anywhere}
+.icard-back{padding:4px 14px 10px;line-height:26px;background-image:repeating-linear-gradient(to bottom,transparent 0 25px,var(--card-line) 25px 26px);background-position:0 4px;overflow-wrap:anywhere;overflow-x:auto}
+.icard-back ul,.icard-back ol,.icard-front ul,.icard-front ol{margin:0;padding-left:1.25em}
+.icard-back table{border-collapse:collapse;line-height:1.4;margin:4px 0;background:var(--surface)}
+.icard-back td,.icard-back th{border:1px solid var(--line);padding:3px 6px;vertical-align:top}
+.cloze{background:var(--accent-soft);border-radius:3px;padding:0 4px;font-weight:600}
+.icard-actions{display:flex;justify-content:flex-end;gap:4px;padding:0 8px 8px}
+.icard-edit{padding:12px;display:grid;gap:10px}
+.icard-edit .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.export{border-top:1px solid var(--line);padding-top:16px;display:grid;gap:12px}
+.msg{font-size:14px}
+.msg.err{color:var(--bad)}
+.msg.ok{color:var(--ok)}
+.empty-state{display:grid;gap:12px}
+
+/* Quiz */
+.qhead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.qdots{display:flex;flex-wrap:wrap;gap:4px}
+.qdot{width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:var(--surface);font-family:var(--f-mono);font-size:11.5px;cursor:pointer;padding:0}
+.qdot.answered{background:var(--surface-2)}
+.qdot.cur{border-color:var(--ink);border-width:2px}
+.qdot.right{background:var(--ok-soft);border-color:var(--ok)}
+.qdot.wrong{background:var(--bad-soft);border-color:var(--bad)}
+.qdot.part{background:var(--warn-soft);border-color:var(--warn)}
+.qtext{font-size:18px;line-height:1.45;font-weight:600;max-width:70ch;overflow-wrap:anywhere}
+.qinstr{font-size:13.5px;color:var(--muted)}
+.opts{display:grid;gap:8px}
+.opt{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px;align-items:start;padding:10px 12px;border:1px solid var(--line);border-radius:8px;cursor:pointer;background:var(--surface)}
+.opt:hover{border-color:var(--accent)}
+.opt input{margin-top:4px;accent-color:var(--accent)}
+.opt .otext{overflow-wrap:anywhere}
+.opt .why{grid-column:2;font-size:13.5px;color:var(--muted)}
+.opt.correct{border-color:var(--ok);background:var(--ok-soft)}
+.opt.wrong{border-color:var(--bad);background:var(--bad-soft)}
+.opt.missed{border-color:var(--ok);border-style:dashed}
+.opt.locked{cursor:default}
+.verdict{font-weight:700}
+.verdict.ok{color:var(--ok)}
+.verdict.bad{color:var(--bad)}
+.verdict.part{color:var(--warn)}
+.feedback{border-radius:8px;background:var(--bg);padding:12px 14px;display:grid;gap:8px;overflow-wrap:anywhere}
+.feedback ul{margin:0;padding-left:1.2em}
+.rub{list-style:none;padding:0;margin:0;display:grid;gap:6px}
+.rub li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 10px}
+.rub .pts{font-family:var(--f-mono);font-size:12.5px;font-variant-numeric:tabular-nums;padding-top:2px}
+.rub .cm{grid-column:2;font-size:13.5px;color:var(--muted)}
+.score-big{font-family:var(--f-display);font-size:44px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.res-top{display:flex;flex-wrap:wrap;gap:16px 32px;align-items:flex-end}
+.bar{height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden;min-width:60px}
+.bar > i{display:block;height:100%;background:var(--accent)}
+.tbl-wrap{overflow-x:auto}
+table.tbl{border-collapse:collapse;width:100%;font-size:14px}
+.tbl th,.tbl td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl th{font-size:12.5px;color:var(--muted);font-weight:600}
+.tbl td.num{font-family:var(--f-mono);font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.review{display:grid;gap:12px}
+.review-item{border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:grid;gap:8px}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div>
+        <h1>Vorlesungs-Lernstudio</h1>
+        <p class="sub">Aus Vorlesungsfolien werden Anki-Karteikarten und Übungsquizze.</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Werkzeug">
+      <button type="button" role="tab" id="tab-karten" aria-selected="true" aria-controls="view-karten">Karteikarten</button>
+      <button type="button" role="tab" id="tab-quiz" aria-selected="false" aria-controls="view-quiz">Quiz</button>
+    </nav>
+  </header>
+
+  <section id="key-panel" class="panel keybox" aria-labelledby="key-h">
+    <div id="key-setup">
+      <div class="panel-head"><h2 id="key-h">Dein Claude-Zugang</h2></div>
+      <p>Das Lernstudio arbeitet mit deinem eigenen API-Schlüssel von Anthropic. Die Seite hat keinen Server: Der Schlüssel bleibt in deinem Browser und wird nur direkt an api.anthropic.com gesendet.</p>
+      <ol class="steps">
+        <li>Lege ein Konto in der <a href="https://platform.claude.com" target="_blank" rel="noopener noreferrer">Claude Console</a> an.</li>
+        <li>Kaufe unter <a href="https://platform.claude.com/settings/billing" target="_blank" rel="noopener noreferrer">Billing</a> Guthaben und setze ein Monatslimit, z. B. 10 $.</li>
+        <li>Erstelle unter <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener noreferrer">API Keys</a> einen Schlüssel und füge ihn hier ein.</li>
+      </ol>
+      <div class="key-row">
+        <label class="key-field"><span class="lbl">API-Schlüssel</span><input type="password" id="api-key" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
+        <button type="button" id="key-save" class="btn primary">Schlüssel prüfen und nutzen</button>
+      </div>
+      <label class="choice"><input type="checkbox" id="key-remember"><span>Auf diesem Gerät merken<small>Nur auf deinem eigenen Gerät. Sonst vergisst der Browser den Schlüssel, wenn du den Tab schließt.</small></span></label>
+      <p id="key-msg" class="msg" role="status"></p>
+      <details class="method">
+        <summary>Was kostet das?</summary>
+        <p>Anthropic rechnet direkt über dein Konto ab, nach verbrauchten Tokens. Grobe Schätzung für eine Vorlesung mit rund 50 Folien: Karteikarten kosten etwa 0,50–1 $ mit „Gründlich“ (Claude Opus 5.5) und 0,25–0,50 $ mit „Schnell“ (Claude Sonnet 5.5), mit Folienbildern etwas mehr. Ein Quiz mit 15 Fragen kostet etwa 0,15–0,45 $. Nach jedem Durchlauf zeigt das Lernstudio die ungefähren Kosten an. Ein Monatslimit in der Console verhindert, dass mehr ausgegeben wird als geplant.</p>
+      </details>
+    </div>
+    <div id="key-ready" class="key-ready" hidden>
+      <span><b>Claude-Zugang aktiv</b> <span id="key-mask" class="mono muted"></span></span>
+      <span id="usage-line" class="mono muted"></span>
+      <span class="actions"><button type="button" id="key-change" class="btn small ghost">Schlüssel ändern</button><button type="button" id="key-forget" class="btn small ghost">Schlüssel entfernen</button></span>
+    </div>
+  </section>
+
+  <div class="layout">
+    <aside class="panel material" aria-labelledby="mat-h">
+      <h2 id="mat-h">Vorlesungsmaterial</h2>
+      <div class="grid2">
+        <label><span class="lbl">Kurs</span><input type="text" id="course" placeholder="z. B. Diagnostik 1 VL" autocomplete="off"></label>
+        <label><span class="lbl">Vorlesung</span><input type="text" id="lecture" placeholder="z. B. 03 Klassische Testtheorie" autocomplete="off"></label>
+      </div>
+      <label class="drop" id="drop">
+        <input type="file" id="file-input" multiple accept=".pdf,.pptx,.docx,.txt,.md">
+        <span class="drop-title">Dateien hierher ziehen oder auswählen</span>
+        <span class="drop-hint">PDF, PowerPoint (.pptx), Word (.docx), Text (.txt, .md)</span>
+      </label>
+      <ul id="file-list" class="file-list"></ul>
+      <details id="paste-box">
+        <summary class="lbl" style="cursor:pointer">Text einfügen</summary>
+        <div style="display:grid;gap:8px;margin-top:8px">
+          <textarea id="paste" rows="6" placeholder="Skript, Mitschrift oder kopierter Folientext"></textarea>
+          <div class="actions"><button type="button" id="paste-add" class="btn small">Text übernehmen</button></div>
+        </div>
+      </details>
+      <div class="actions" style="justify-content:space-between">
+        <p id="mat-summary" class="mat-summary">Noch kein Material geladen.</p>
+        <button type="button" id="mat-clear" class="btn small ghost" hidden>Material leeren</button>
+      </div>
+    </aside>
+
+    <main class="stack">
+      <!-- KARTEIKARTEN -->
+      <section id="view-karten" role="tabpanel" aria-labelledby="tab-karten" class="stack">
+        <div class="panel">
+          <div class="panel-head"><h2>Karteikarten erstellen</h2></div>
+          <div class="grid2">
+            <fieldset>
+              <legend>Umfang</legend>
+              <label class="choice"><input type="radio" name="density" value="kompakt"><span>Kompakt<small>Kernkonzepte, etwa 1 Karte pro Folie</small></span></label>
+              <label class="choice"><input type="radio" name="density" value="vollstaendig" checked><span>Vollständig<small>Jede prüfungsrelevante Aussage, 1–3 Karten pro Folie</small></span></label>
+              <label class="choice"><input type="radio" name="density" value="maximal"><span>Maximal<small>Zusätzlich Detail- und Verständnisfragen</small></span></label>
+            </fieldset>
+            <fieldset>
+              <legend>Kartentypen</legend>
+              <label class="choice"><input type="checkbox" checked disabled><span>Frage – Antwort<small>Standard, wie in deinen Decks</small></span></label>
+              <label class="choice"><input type="checkbox" id="opt-reverse" checked><span>Umkehrkarten<small>Fachbegriff ↔ Definition in beide Richtungen</small></span></label>
+              <label class="choice"><input type="checkbox" id="opt-cloze" checked><span>Lückentext<small>Für Definitionen, Zahlen, Formeln</small></span></label>
+            </fieldset>
+            <label><span class="lbl">Sprache der Karten</span>
+              <select id="opt-lang">
+                <option value="auto">Wie das Material</option>
+                <option value="de">Deutsch</option>
+                <option value="en">Englisch</option>
+              </select>
+            </label>
+            <label><span class="lbl">Gründlichkeit</span>
+              <select id="opt-tier">
+                <option value="complex">Gründlich (Claude Opus 5.5)</option>
+                <option value="default">Schnell (Claude Sonnet 5.5, etwa halbe Kosten)</option>
+              </select>
+            </label>
+          </div>
+          <label class="choice"><input type="checkbox" id="opt-images"><span>Folienbilder an Claude mitsenden<small id="opt-images-hint">Liest auch Diagramme, Abbildungen und gescannte Folien. Nur bei PDF.</small></span></label>
+          <label class="choice"><input type="checkbox" id="opt-coverage" checked><span>Abdeckung prüfen und Lücken füllen<small>Ein zweiter Durchgang vergleicht Folie für Folie mit den Karten und ergänzt Fehlendes.</small></span></label>
+          <label><span class="lbl">Deine Anforderungen an die Karten</span>
+            <textarea id="card-req" rows="4" placeholder="z. B. Bei Studien immer Autor, Jahr, Methode und Befund abfragen. Englische Fachbegriffe in Klammern ergänzen. Folien 1–3 auslassen."></textarea>
+          </label>
+          <div class="actions">
+            <button type="button" id="gen-cards" class="btn primary">Karteikarten erstellen</button>
+            <button type="button" id="stop-cards" class="btn" hidden>Stopp</button>
+            <span id="gen-cards-msg" class="hint" role="status"></span>
+          </div>
+          <ol id="card-progress" class="progress" aria-live="polite"></ol>
+          <details class="method">
+            <summary>Wie die Karten entstehen</summary>
+            <p>Das Material wird in gleich große Abschnitte geteilt, die parallel bearbeitet werden. Kopfzeilen, die auf jeder Folie stehen, werden vorher entfernt. Für jeden Abschnitt schreibt Claude Karten im Stil deiner bisherigen Decks: kurze Frage vorne, Stichpunkte hinten, Fachbegriffe fett, Anzahl bei Aufzählungen, Folie als Quelle. Dabei gilt das Minimum-Information-Prinzip (eine Karte, ein Gedanke), und Claude nutzt nur das Material. Die Karten erscheinen, sobald sie geschrieben sind. Danach prüft ein zweiter Durchgang Folie für Folie, was noch fehlt, und markiert doppelte Karten.</p>
+          </details>
+        </div>
+
+        <div class="panel" id="deck-panel">
+          <div class="panel-head"><h2>Dein Deck</h2><div id="deck-stats" class="stats"></div></div>
+          <div id="deck-empty" class="empty-state">
+            <p class="hint">Lade links dein Material und klicke auf „Karteikarten erstellen“. So sieht eine Karte aus:</p>
+            <article class="icard" aria-label="Beispielkarte">
+              <div class="icard-meta"><span class="chip example">Beispiel</span><span class="chip">Folie 14</span><span class="chip type">Frage – Antwort</span><span class="topic">Reliabilität</span></div>
+              <div class="icard-front">Welche Methoden der Reliabilitätsschätzung gibt es? (4)</div>
+              <div class="icard-back"><ul><li><b>Retest-Reliabilität</b>: derselbe Test zu zwei Zeitpunkten → Stabilität</li><li><b>Paralleltest-Reliabilität</b>: zwei äquivalente Testformen</li><li><b>Testhalbierung</b> (Split-Half): Korrelation zweier Testhälften</li><li><b>Interne Konsistenz</b>: z. B. Cronbachs α</li></ul></div>
+            </article>
+          </div>
+          <div id="deck-body" hidden>
+            <div id="coverage" class="cov"></div>
+            <div class="deck-tools">
+              <input type="search" id="card-search" placeholder="Karten durchsuchen" aria-label="Karten durchsuchen">
+              <button type="button" id="add-card" class="btn small">Karte hinzufügen</button>
+              <button type="button" id="run-coverage" class="btn small">Lücken suchen</button>
+              <button type="button" id="drop-dupes" class="btn small" hidden>Dubletten entfernen</button>
+            </div>
+            <p id="filter-note" class="filter-note" hidden></p>
+            <div id="card-list" class="card-list"></div>
+            <div class="export">
+              <h3>Nach Anki exportieren</h3>
+              <div class="grid2">
+                <label><span class="lbl">Deckname in Anki</span><input type="text" id="deck-name" autocomplete="off"></label>
+                <label class="choice" style="align-self:end"><input type="checkbox" id="opt-slideimg"><span>Folienbild auf der Rückseite<small id="opt-slideimg-hint">Wie in deinem Deck zur Persönlichkeitspsychologie. Nur für PDFs, die in dieser Sitzung geladen wurden.</small></span></label>
+              </div>
+              <div class="actions">
+                <button type="button" id="export-apkg" class="btn primary">Anki-Datei speichern</button>
+                <button type="button" id="clear-deck" class="btn small ghost">Deck verwerfen</button>
+              </div>
+              <p class="hint">Du bekommst eine .apkg-Datei. Ein Doppelklick öffnet sie in Anki und importiert das Deck mit Unterdeck, Schlagwörtern und Folienangabe.</p>
+              <p id="export-msg" class="msg" role="status"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- QUIZ -->
+      <section id="view-quiz" role="tabpanel" aria-labelledby="tab-quiz" class="stack" hidden>
+        <div class="panel" id="quiz-setup">
+          <div class="panel-head"><h2>Quiz erstellen</h2></div>
+          <fieldset>
+            <legend>Fragetypen</legend>
+            <div class="seg">
+              <label><input type="checkbox" name="qtype" value="tf" checked><span>Wahr / Falsch</span></label>
+              <label><input type="checkbox" name="qtype" value="single" checked><span>Single Choice</span></label>
+              <label><input type="checkbox" name="qtype" value="multi" checked><span>Multiple Choice</span></label>
+              <label><input type="checkbox" name="qtype" value="open" checked><span>Offene Fragen</span></label>
+            </div>
+          </fieldset>
+          <div class="grid2">
+            <label><span class="lbl">Anzahl Fragen</span><input type="number" id="q-count" min="3" max="60" value="15"></label>
+            <label><span class="lbl">Niveau</span>
+              <select id="q-level">
+                <option value="gemischt">Gemischt (Erinnern bis Analysieren)</option>
+                <option value="grundlagen">Grundlagen (Begriffe, Fakten)</option>
+                <option value="klausur">Klausurniveau (Verstehen, Anwenden, Analysieren)</option>
+              </select>
+            </label>
+            <label><span class="lbl">Antwortoptionen bei Choice-Fragen</span>
+              <select id="q-k"><option value="4">4 Optionen</option><option value="5" selected>5 Optionen</option></select>
+            </label>
+            <label><span class="lbl">Bewertung Multiple Choice</span>
+              <select id="q-scoring">
+                <option value="all">Alles oder nichts</option>
+                <option value="partial">Teilpunkte je Option</option>
+              </select>
+            </label>
+            <label><span class="lbl">Modus</span>
+              <select id="q-mode">
+                <option value="lern">Lernmodus: Feedback nach jeder Frage</option>
+                <option value="klausur">Klausurmodus: Auswertung am Ende</option>
+              </select>
+            </label>
+            <label><span class="lbl">Gründlichkeit</span>
+              <select id="q-tier">
+                <option value="complex">Gründlich (Claude Opus 5.5)</option>
+                <option value="default">Schnell (Claude Sonnet 5.5, etwa halbe Kosten)</option>
+              </select>
+            </label>
+          </div>
+          <label><span class="lbl">Deine Anforderungen an das Quiz</span>
+            <textarea id="quiz-req" rows="4" placeholder="z. B. Schwerpunkt auf Studien und deren Befunden. Fallvignetten für Anwendungsfragen. Formulierungen wie in der Altklausur: „Welche Aussage trifft zu?“"></textarea>
+          </label>
+          <div class="actions">
+            <button type="button" id="gen-quiz" class="btn primary">Quiz erstellen</button>
+            <button type="button" id="stop-quiz" class="btn" hidden>Stopp</button>
+            <button type="button" id="start-quiz" class="btn" hidden>Quiz starten</button>
+            <label class="btn small ghost" style="position:relative;overflow:hidden">Gespeichertes Quiz öffnen<input type="file" id="quiz-load" accept=".json,application/json" style="position:absolute;inset:0;opacity:0;cursor:pointer"></label>
+            <span id="gen-quiz-msg" class="hint" role="status"></span>
+          </div>
+          <ol id="quiz-progress" class="progress" aria-live="polite"></ol>
+          <details class="method">
+            <summary>Wie die Fragen entstehen</summary>
+            <p>Abrufen festigt Wissen stärker als Wiederlesen (Testeffekt). Die Fragen folgen den Regeln zur Itemkonstruktion von Haladyna, Downing und Rodriguez (2002): eine klare Frage pro Item, plausible Ablenker aus typischen Verwechslungen, kein „Alle/Keine der genannten“, keine verräterischen Signalwörter. Die Fragen verteilen sich über die Stufen Erinnern, Verstehen, Anwenden und Analysieren. Zu jeder Antwortoption gibt es eine Begründung, und offene Antworten bewertet Claude anhand eines Punkterasters.</p>
+          </details>
+        </div>
+
+        <div class="panel" id="quiz-run" hidden></div>
+        <div class="panel" id="quiz-result" hidden></div>
+      </section>
+    </main>
+  </div>
+  <footer class="foot">
+    <p>Das Lernstudio läuft komplett in deinem Browser. Material, Karten und Quizze bleiben in diesem Browser gespeichert. An Anthropic gehen nur die Inhalte, aus denen Claude Karten und Fragen erstellt (Folientext und auf Wunsch Folienbilder), zusammen mit deinem API-Schlüssel.</p>
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(() => {
+'use strict';
+
+/* ---------- Basics ---------- */
+const CDN = {
+  pdfWorker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+  sql: 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-asm.js',
+};
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') n.className = v;
+    else if (k === 'text') n.textContent = v;
+    else if (k === 'html') n.innerHTML = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v === true ? '' : String(v));
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) n.append(kid instanceof Node ? kid : String(kid));
+  return n;
+}
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('lernstudio.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('lernstudio.' + k, JSON.stringify(v)); return true; } catch { return false; } },
+  del(k) { try { localStorage.removeItem('lernstudio.' + k); } catch {} },
+};
+const loadedScripts = {};
+function loadScript(src) {
+  if (!loadedScripts[src]) loadedScripts[src] = new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = res;
+    s.onerror = () => { delete loadedScripts[src]; rej(new Error('Eine Programmbibliothek konnte nicht geladen werden. Prüfe deine Internetverbindung und versuche es erneut.')); };
+    document.head.appendChild(s);
+  });
+  return loadedScripts[src];
+}
+const idle = fn => (window.requestIdleCallback || (f => setTimeout(f, 1200)))(fn);
+const escapeHtml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function stripHtml(html) {
+  const d = new DOMParser().parseFromString('<div>' + html + '</div>', 'text/html');
+  d.querySelectorAll('li,br,p,div,tr').forEach(n => n.append(' '));
+  return d.body.textContent.replace(/\s+/g, ' ').trim();
+}
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+const fmt = n => (Math.round(n * 10) / 10).toLocaleString('de-DE');
+let seq = store.get('seq', 0);
+const newId = p => p + (++seq).toString(36) + (store.set('seq', seq) ? '' : '');
+function newGuid() {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&()*+,-./:;<=>?@[]^_`{|}~';
+  const b = new Uint8Array(10); crypto.getRandomValues(b);
+  return Array.from(b, x => chars[x % chars.length]).join('');
+}
+function armConfirm(btn, label, fn) {
+  if (btn.dataset.armed) { clearTimeout(btn._t); delete btn.dataset.armed; btn.textContent = btn.dataset.label; fn(); return; }
+  btn.dataset.label = btn.textContent; btn.dataset.armed = '1'; btn.textContent = label;
+  btn._t = setTimeout(() => { delete btn.dataset.armed; btn.textContent = btn.dataset.label; }, 4000);
+}
+
+/* ---------- Claude API (eigener Schlüssel, direkt aus dem Browser) ---------- */
+const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.131.0/+esm';
+const API_BASE = undefined; // undefined: the SDK's default, https://api.anthropic.com
+const MODELS = { complex: 'claude-opus-5-5', default: 'claude-sonnet-5-5' };
+// US dollars per million tokens (input, output): Claude API list prices, October 2026.
+const PRICES = { 'claude-opus-5-5': [4, 20], 'claude-sonnet-5-5': [2, 10], 'claude-opus-5': [5, 25], 'claude-opus-4-8': [5, 25], 'claude-sonnet-5': [2, 10] };
+const caps = { imageMax: 8 };
+const usage = { cost: 0 };
+// Requests run in parallel; the SDK retries rate limits and overloads on its own.
+const POOL = 4;
+// Card writing is extraction, so little thinking is needed; checks and distractors get a bit more.
+const EFFORT = { cards: 'low', coverage: 'medium', quiz: 'medium', grade: 'low' };
+const FATAL = new Set(['no_key', 'auth', 'permission', 'spend_cap', 'billing', 'model']);
+function errText(e) {
+  if (e instanceof Error) return e.message;
+  const map = {
+    no_key: 'Trage zuerst oben deinen Claude-API-Schlüssel ein.',
+    auth: 'Anthropic hat den API-Schlüssel abgelehnt. Prüfe ihn oder erstelle in der Claude Console einen neuen.',
+    permission: 'Dieser API-Schlüssel darf die Anfrage nicht ausführen.',
+    model: 'Das Modell ist für dein API-Konto nicht verfügbar.',
+    spend_cap: 'Das monatliche Ausgabenlimit deines API-Kontos ist erreicht. Du kannst es in der Claude Console unter Billing erhöhen.',
+    billing: 'Es gibt ein Problem mit der Abrechnung deines API-Kontos. Prüfe Guthaben und Zahlungsdaten in der Claude Console.',
+    bad_request: 'Anthropic hat die Anfrage abgelehnt.',
+    rate_limited: 'Zu viele Anfragen in kurzer Zeit. Warte eine Minute und klicke dann auf „Erneut versuchen“.',
+    overloaded: 'Claude ist gerade überlastet. Versuche es in ein paar Minuten erneut.',
+    network: 'Keine Verbindung zu Claude. Prüfe deine Internetverbindung und klicke auf „Erneut versuchen“.',
+    invalid_json: 'Claudes Antwort war unvollständig. Klicke auf „Erneut versuchen“.',
+    refused: 'Claude hat diesen Abschnitt nicht bearbeitet. Prüfe den Inhalt und deine Anforderungen.',
+    empty_completion: 'Claude hat keine Antwort geliefert. Klicke auf „Erneut versuchen“.',
+    upstream_error: 'Die Verbindung zu Claude wurde unterbrochen. Klicke auf „Erneut versuchen“.',
+    bad_shape: 'Claudes Antwort hatte nicht das erwartete Format. Klicke auf „Erneut versuchen“.',
+  };
+  const text = map[e && e.code] || map.upstream_error;
+  // Anthropic's own message says what to fix for these (for example a low credit balance).
+  return e && e.detail && ['bad_request', 'permission', 'billing'].includes(e.code) ? `${text} ${e.detail}` : text;
+}
+let Anthropic = null, client = null, clientKey = '', memKey = '';
+const KEY_NAME = 'lernstudio.apiKey';
+function readKey() {
+  let k = memKey;
+  try { k = k || sessionStorage.getItem(KEY_NAME) || localStorage.getItem(KEY_NAME) || ''; } catch {}
+  return k;
+}
+function writeKey(k, remember) {
+  memKey = k;
+  try { sessionStorage.removeItem(KEY_NAME); localStorage.removeItem(KEY_NAME); (remember ? localStorage : sessionStorage).setItem(KEY_NAME, k); } catch {}
+}
+function forgetKey() {
+  memKey = ''; client = null; clientKey = '';
+  try { sessionStorage.removeItem(KEY_NAME); localStorage.removeItem(KEY_NAME); } catch {}
+}
+const hasKey = () => !!readKey();
+async function loadSdk() {
+  if (!Anthropic) {
+    try { Anthropic = (await import(SDK_URL)).default; }
+    catch { throw new Error('Die Anthropic-Bibliothek konnte nicht geladen werden. Prüfe deine Internetverbindung.'); }
+  }
+  return Anthropic;
+}
+function newClient(apiKey, maxRetries) {
+  return new Anthropic({ apiKey, baseURL: API_BASE, dangerouslyAllowBrowser: true, maxRetries });
+}
+async function getClient() {
+  const key = readKey();
+  if (!key) throw { code: 'no_key' };
+  await loadSdk();
+  if (!client || clientKey !== key) { client = newClient(key, 2); clientKey = key; }
+  return client;
+}
+// Maps SDK errors to the codes the page shows; most specific class first.
+function apiError(e) {
+  const A = Anthropic;
+  if (!A || !(e instanceof A.APIError)) return e;
+  const body = e.error && e.error.error;
+  const detail = (body && body.message) || '';
+  if (e instanceof A.APIUserAbortError) return { code: 'cancelled' };
+  if (e instanceof A.APIConnectionError) return { code: 'network' };
+  if (e instanceof A.AuthenticationError) return { code: 'auth' };
+  if (e instanceof A.PermissionDeniedError) return { code: 'permission', detail };
+  if (e instanceof A.NotFoundError) return { code: 'model' };
+  if (e instanceof A.RateLimitError) return { code: body && body.details && body.details.error_code === 'enforced_spend_limit_reached' ? 'spend_cap' : 'rate_limited' };
+  if (e instanceof A.BadRequestError) return { code: 'bad_request', detail };
+  if (e instanceof A.InternalServerError) return { code: e.status === 529 ? 'overloaded' : 'upstream_error' };
+  return { code: e.status === 402 ? 'billing' : 'upstream_error', detail };
+}
+const fmtUsd = v => (v < 0.01 ? '< 0,01' : v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) + ' $';
+function addUsage(msg) {
+  const u = msg && msg.usage;
+  if (!u) return;
+  // With a server-side fallback, usage.iterations lists every attempt with its own model.
+  const parts = Array.isArray(u.iterations) && u.iterations.length ? u.iterations : [u];
+  for (const p of parts) {
+    const [pin, pout] = PRICES[p.model || msg.model] || PRICES['claude-opus-5-5'];
+    const inTok = (p.input_tokens || 0) + (p.cache_creation_input_tokens || 0) * 1.25 + (p.cache_read_input_tokens || 0) * 0.1;
+    usage.cost += (inTok * pin + (p.output_tokens || 0) * pout) / 1e6;
+  }
+  paintUsage();
+}
+const costNote = since => usage.cost - since > 0 ? ` · ca. ${fmtUsd(usage.cost - since)}` : '';
+async function blobToBase64(b) {
+  const buf = new Uint8Array(await b.arrayBuffer());
+  let s = '';
+  for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+// One streamed Messages API call. Text arrives at onText piece by piece.
+async function callClaude(prompt, { tier = 'complex', effort, signal, images, onText, maxTokens = 64000 } = {}) {
+  const c = await getClient();
+  const content = [];
+  for (const b of images || []) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await blobToBase64(b) } });
+  content.push({ type: 'text', text: prompt });
+  const params = {
+    model: MODELS[tier] || MODELS.complex,
+    max_tokens: maxTokens,
+    messages: [{ role: 'user', content }],
+    // If a safety classifier declines, the API retries on the model Anthropic recommends for that case.
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+  };
+  if (effort) params.output_config = { effort };
+  let msg;
+  try {
+    const stream = c.beta.messages.stream(params, { signal });
+    if (onText) stream.on('text', delta => onText(delta));
+    msg = await stream.finalMessage();
+  } catch (e) {
+    if (signal && signal.aborted) throw { code: 'cancelled' };
+    throw apiError(e);
+  }
+  addUsage(msg);
+  if (msg.stop_reason === 'refusal') throw { code: 'refused' };
+  const text = msg.content.filter(b => b.type === 'text').map(b => b.text).join('');
+  if (!text.trim()) throw { code: 'empty_completion' };
+  return { text, truncated: msg.stop_reason === 'max_tokens' };
+}
+function parseObject(text) {
+  for (const t of [text, (text.match(/```(?:json)?\s*([\s\S]*?)```/) || [])[1], text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)]) {
+    if (!t) continue;
+    try { const v = JSON.parse(t); if (v && typeof v === 'object' && !Array.isArray(v)) return v; } catch {}
+  }
+  return null;
+}
+async function askJSON(prompt, o = {}) {
+  const { text } = await callClaude(prompt, Object.assign({ maxTokens: 16000 }, o));
+  const v = parseObject(text);
+  if (!v) throw { code: 'invalid_json' };
+  return v;
+}
+function parseLine(line) {
+  let s = line.trim().replace(/^```(?:json|jsonl)?/i, '').replace(/```$/, '').replace(/,$/, '').trim();
+  if (!s.startsWith('{') || !s.endsWith('}')) return null;
+  try { const v = JSON.parse(s); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
+}
+function parseWhole(text) {
+  const tries = [text, (text.match(/```(?:json)?\s*([\s\S]*?)```/) || [])[1], text.slice(Math.min(...['{', '['].map(c => text.indexOf(c)).filter(i => i >= 0)), Math.max(text.lastIndexOf('}'), text.lastIndexOf(']')) + 1)];
+  for (const t of tries) {
+    if (!t) continue;
+    try {
+      const v = JSON.parse(t);
+      if (Array.isArray(v)) return v.filter(x => x && typeof x === 'object');
+      if (v && typeof v === 'object') {
+        const out = [];
+        for (const k of ['cards', 'add', 'questions']) if (Array.isArray(v[k])) out.push(...v[k]);
+        if (Array.isArray(v.duplicates)) out.push({ duplicates: v.duplicates });
+        return out;
+      }
+    } catch {}
+  }
+  return [];
+}
+// Streams a reply written as one JSON object per line and hands each object over as soon as its line is complete.
+async function streamItems(prompt, { onItem, ...o }) {
+  let pending = '', count = 0;
+  // A line may also hold the older single-object form ({"cards":[…]}); unpack it into items.
+  const expand = v => {
+    for (const k of ['cards', 'add', 'questions']) if (Array.isArray(v[k])) return v[k].filter(x => x && typeof x === 'object').concat(Array.isArray(v.duplicates) ? [{ duplicates: v.duplicates }] : []);
+    return [v];
+  };
+  const take = line => { const v = parseLine(line); if (v) expand(v).forEach(x => { count++; onItem(x); }); };
+  let res;
+  try {
+    res = await callClaude(prompt, Object.assign({}, o, { onText: delta => { pending += delta; const lines = pending.split('\n'); pending = lines.pop(); lines.forEach(take); } }));
+  } catch (e) {
+    if (e instanceof Error) throw e;
+    throw Object.assign({}, e, { count });
+  }
+  if (pending.trim()) take(pending);
+  if (!count) parseWhole(res.text).forEach(v => { count++; onItem(v); });
+  return { truncated: res.truncated, count };
+}
+async function saveFile(filename, data) {
+  const blob = data instanceof Blob ? data : new Blob([data], { type: typeof data === 'string' ? 'application/json' : 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return { status: 'saved' };
+}
+/* ---------- Schlüssel-Verwaltung ---------- */
+function maskKey(k) { return k.length > 14 ? k.slice(0, 10) + '…' + k.slice(-4) : '…'; }
+function paintUsage() {
+  const el = $('#usage-line');
+  if (el) el.textContent = usage.cost ? `Verbrauch in dieser Sitzung: ca. ${fmtUsd(usage.cost)}` : 'Noch kein Verbrauch in dieser Sitzung';
+}
+function paintKey() {
+  const k = readKey();
+  $('#key-setup').hidden = !!k;
+  $('#key-ready').hidden = !k;
+  $('#key-mask').textContent = k ? maskKey(k) : '';
+  paintUsage();
+}
+function focusKey() {
+  $('#key-setup').hidden = false;
+  $('#key-panel').scrollIntoView({ block: 'start' });
+  $('#api-key').focus();
+}
+async function saveKey() {
+  const input = $('#api-key'), msg = $('#key-msg'), btn = $('#key-save');
+  const k = input.value.trim();
+  msg.className = 'msg';
+  if (!k) { msg.className = 'msg err'; msg.textContent = 'Füge zuerst deinen API-Schlüssel ein.'; return; }
+  if (!/^sk-ant-/.test(k)) { msg.className = 'msg err'; msg.textContent = 'Das sieht nicht nach einem Claude-API-Schlüssel aus. Er beginnt mit „sk-ant-“.'; return; }
+  btn.disabled = true; msg.textContent = 'Schlüssel wird geprüft …';
+  try {
+    await loadSdk();
+    // Looking up the model is free and confirms both the key and access to the model.
+    await newClient(k, 1).models.retrieve(MODELS.complex);
+    writeKey(k, $('#key-remember').checked);
+    client = null;
+    input.value = ''; msg.textContent = '';
+    paintKey();
+  } catch (e) {
+    msg.className = 'msg err'; msg.textContent = errText(apiError(e));
+  } finally { btn.disabled = false; }
+}
+async function runPool(items, n, signal, fn) {
+  let i = 0;
+  const worker = async () => { while (i < items.length) { const it = items[i++]; if (signal.aborted) { it.status = 'abgebrochen'; continue; } await fn(it); } };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+}
+
+/* ---------- State ---------- */
+const state = {
+  files: store.get('files', []),
+  units: store.get('units', []),
+  cards: store.get('cards', []),
+  quiz: store.get('quiz', null),
+};
+const pdfDocs = new Map(); // fileId -> pdf.js document (only for files loaded in this session)
+state.files.forEach(f => { f.live = false; });
+function saveMaterial() {
+  const ok = store.set('files', state.files.map(({ live, ...f }) => f)) && store.set('units', state.units);
+  if (!ok) store.del('units');
+}
+function saveCards() { store.set('cards', state.cards); }
+function saveQuiz() { if (state.quiz) store.set('quiz', state.quiz); else store.del('quiz'); }
+
+/* ---------- Material import ---------- */
+function cleanText(s) {
+  return String(s).replace(/\u00a0/g, ' ').replace(/[ \t\f\v]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+function splitText(text, base) {
+  const paras = cleanText(text).split(/\n{2,}/);
+  const out = []; let cur = '';
+  for (const p of paras) {
+    if (cur && cur.length + p.length > 3000) { out.push(cur); cur = ''; }
+    if (p.length > 3000) { for (let i = 0; i < p.length; i += 3000) out.push(p.slice(i, i + 3000)); continue; }
+    cur += (cur ? '\n\n' : '') + p;
+  }
+  if (cur) out.push(cur);
+  return out.map((t, i) => ({ kind: base, num: i + 1, label: base + ' ' + (i + 1), text: t }));
+}
+async function parsePdf(file, entry) {
+  await loadScript(CDN.pdfWorker);
+  if (!window.pdfjsLib) throw new Error('Der PDF-Leser konnte nicht geladen werden.');
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = CDN.pdfWorker;
+  const data = new Uint8Array(await file.arrayBuffer());
+  const doc = await window.pdfjsLib.getDocument({ data, isEvalSupported: false, useSystemFonts: true }).promise;
+  const units = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const tc = await page.getTextContent();
+    let t = '';
+    for (const it of tc.items) { if (typeof it.str !== 'string') continue; t += it.str + (it.hasEOL ? '\n' : ' '); }
+    units.push({ kind: 'Folie', num: i, label: 'Folie ' + i, text: cleanText(t) });
+    page.cleanup();
+  }
+  pdfDocs.set(entry.id, doc);
+  entry.live = true;
+  return units;
+}
+function xmlText(xml, paraTag, textTag) {
+  const d = new DOMParser().parseFromString(xml, 'application/xml');
+  return Array.from(d.getElementsByTagName(paraTag)).map(p => Array.from(p.getElementsByTagName(textTag)).map(t => t.textContent).join('')).filter(Boolean).join('\n');
+}
+function resolvePath(base, target) {
+  const parts = base.split('/'); parts.pop();
+  for (const seg of target.split('/')) { if (seg === '..') parts.pop(); else if (seg && seg !== '.') parts.push(seg); }
+  return parts.join('/');
+}
+function relsMap(xml, basePath) {
+  const d = new DOMParser().parseFromString(xml, 'application/xml');
+  const m = {};
+  for (const r of Array.from(d.getElementsByTagName('Relationship'))) m[r.getAttribute('Id')] = { target: resolvePath(basePath, r.getAttribute('Target') || ''), type: r.getAttribute('Type') || '' };
+  return m;
+}
+async function parsePptx(file) {
+  const zip = await window.JSZip.loadAsync(file);
+  let order = [];
+  try {
+    const pres = await zip.file('ppt/presentation.xml').async('string');
+    const rels = relsMap(await zip.file('ppt/_rels/presentation.xml.rels').async('string'), 'ppt/presentation.xml');
+    const d = new DOMParser().parseFromString(pres, 'application/xml');
+    order = Array.from(d.getElementsByTagName('p:sldId')).map(n => rels[n.getAttribute('r:id')] && rels[n.getAttribute('r:id')].target).filter(p => p && zip.file(p));
+  } catch { order = []; }
+  if (!order.length) {
+    const num = p => parseInt(p.match(/(\d+)\.xml$/)[1], 10);
+    order = Object.keys(zip.files).filter(p => /^ppt\/slides\/slide\d+\.xml$/.test(p)).sort((a, b) => num(a) - num(b));
+  }
+  const units = [];
+  for (let i = 0; i < order.length; i++) {
+    const path = order[i];
+    let text = xmlText(await zip.file(path).async('string'), 'a:p', 'a:t');
+    const relPath = path.replace(/slides\/(slide\d+\.xml)$/, 'slides/_rels/$1.rels');
+    if (zip.file(relPath)) {
+      const rels = relsMap(await zip.file(relPath).async('string'), path);
+      const notes = Object.values(rels).find(r => /notesSlide$/.test(r.type));
+      if (notes && zip.file(notes.target)) {
+        const nt = xmlText(await zip.file(notes.target).async('string'), 'a:p', 'a:t').split('\n').filter(l => !/^\d+$/.test(l.trim())).join('\n');
+        if (nt.trim()) text += '\n[Notizen] ' + nt;
+      }
+    }
+    units.push({ kind: 'Folie', num: i + 1, label: 'Folie ' + (i + 1), text: cleanText(text) });
+  }
+  if (!units.length) throw new Error('In dieser PowerPoint-Datei wurden keine Folien gefunden.');
+  return units;
+}
+async function parseDocx(file) {
+  const zip = await window.JSZip.loadAsync(file);
+  const f = zip.file('word/document.xml');
+  if (!f) throw new Error('Diese Word-Datei konnte nicht gelesen werden.');
+  return splitText(xmlText(await f.async('string'), 'w:p', 'w:t'), 'Abschnitt');
+}
+async function addFiles(list) {
+  for (const file of Array.from(list)) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const entry = { id: state.files.reduce((m, f) => Math.max(m, f.id), 0) + 1, name: file.name, ext, count: 0, chars: 0, empty: 0, status: 'lädt', live: false };
+    state.files.push(entry); renderFiles();
+    try {
+      let units;
+      if (ext === 'pdf') units = await parsePdf(file, entry);
+      else if (ext === 'pptx') units = await parsePptx(file);
+      else if (ext === 'docx') units = await parseDocx(file);
+      else if (ext === 'txt' || ext === 'md') units = splitText(await file.text(), 'Abschnitt');
+      else if (ext === 'ppt' || ext === 'key' || ext === 'doc') throw new Error('Altes Format. Speichere die Datei als PDF oder .pptx/.docx und lade sie erneut.');
+      else throw new Error('Dateityp nicht unterstützt. Erlaubt sind PDF, PPTX, DOCX, TXT und MD.');
+      units.forEach(u => { u.fileId = entry.id; u.fileName = file.name; });
+      entry.count = units.length;
+      entry.chars = units.reduce((a, u) => a + u.text.length, 0);
+      entry.empty = units.filter(u => u.text.length < 20).length;
+      entry.status = 'ok';
+      state.units.push(...units);
+      boilerCache.delete(entry.id);
+    } catch (err) {
+      entry.status = 'error';
+      entry.error = (err && err.message) || 'Die Datei konnte nicht gelesen werden.';
+    }
+    renderFiles(); saveMaterial();
+  }
+  updateImageOptions();
+  suggestNames();
+}
+function addPasted() {
+  const t = $('#paste').value.trim();
+  if (!t) return;
+  const id = state.files.reduce((m, f) => Math.max(m, f.id), 0) + 1;
+  const name = 'Eingefügter Text ' + (state.files.filter(f => f.ext === 'paste').length + 1);
+  const units = splitText(t, 'Abschnitt');
+  units.forEach(u => { u.fileId = id; u.fileName = name; });
+  state.files.push({ id, name, ext: 'paste', count: units.length, chars: t.length, empty: 0, status: 'ok', live: false });
+  state.units.push(...units);
+  $('#paste').value = '';
+  $('#paste-box').open = false;
+  renderFiles(); saveMaterial();
+}
+function removeFile(id) {
+  state.files = state.files.filter(f => f.id !== id);
+  state.units = state.units.filter(u => u.fileId !== id);
+  pdfDocs.delete(id);
+  resetMaterialCaches();
+  renderFiles(); saveMaterial(); updateImageOptions(); renderDeck();
+}
+function suggestNames() {
+  const lec = $('#lecture');
+  if (!lec.value.trim()) {
+    const f = state.files.find(x => x.status === 'ok' && x.ext !== 'paste');
+    if (f) { lec.value = f.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim(); saveMeta(); }
+  }
+  syncDeckName();
+}
+function renderFiles() {
+  const ul = $('#file-list');
+  ul.replaceChildren(...state.files.map(f => {
+    let meta, cls = 'file-meta';
+    if (f.status === 'lädt') meta = 'wird gelesen …';
+    else if (f.status === 'error') { meta = f.error; cls += ' err'; }
+    else {
+      const unit = f.ext === 'pdf' || f.ext === 'pptx' ? (f.count === 1 ? 'Folie' : 'Folien') : (f.count === 1 ? 'Abschnitt' : 'Abschnitte');
+      meta = `${f.count} ${unit} · ${Math.round(f.chars / 100) / 10}k Zeichen`;
+      if (f.ext === 'pdf' && f.empty > f.count / 2) { meta += ' · kaum Text: Folienbilder mitsenden'; cls += ' warn'; }
+      else if (f.ext === 'pdf' && !f.live && !pdfDocs.has(f.id)) meta += ' · Bilder erst nach erneutem Laden';
+    }
+    return el('li', { class: 'file' },
+      el('span', { class: 'file-name', text: f.name }),
+      el('span', { class: cls, text: meta }),
+      f.status === 'lädt' ? null : el('button', { type: 'button', class: 'btn small ghost', 'aria-label': f.name + ' entfernen', onclick: () => removeFile(f.id) }, 'Entfernen'));
+  }));
+  const ok = state.files.filter(f => f.status === 'ok');
+  const chars = state.units.reduce((a, u) => a + u.text.length, 0);
+  $('#mat-summary').textContent = ok.length ? `${ok.length} ${ok.length === 1 ? 'Quelle' : 'Quellen'} · ${state.units.length} Folien/Abschnitte · ${Math.round(chars / 1000)}k Zeichen` : 'Noch kein Material geladen.';
+  $('#mat-clear').hidden = !state.files.length;
+}
+// Lines that repeat on at least half of a file's slides (chair name, lecture title, term) are page furniture.
+// Leaving them out shortens every request without losing content.
+const boilerCache = new Map();
+function boilerplate(fileId) {
+  if (boilerCache.has(fileId)) return boilerCache.get(fileId);
+  const units = state.units.filter(u => u.fileId === fileId);
+  const lines = new Set();
+  if (units.length >= 4) {
+    const count = new Map();
+    units.forEach(u => new Set(u.text.split('\n').map(l => l.trim()).filter(Boolean)).forEach(l => count.set(l, (count.get(l) || 0) + 1)));
+    count.forEach((n, l) => { if (n >= Math.max(3, units.length / 2)) lines.add(l); });
+  }
+  boilerCache.set(fileId, lines);
+  return lines;
+}
+function unitText(u) {
+  const b = boilerplate(u.fileId);
+  return b.size ? u.text.split('\n').filter(l => !b.has(l.trim())).join('\n').trim() : u.text;
+}
+function resetMaterialCaches() { boilerCache.clear(); slideCache.clear(); }
+function usableUnits(withImages) {
+  return state.units.filter(u => unitText(u).length >= 3 || (withImages && pdfDocs.has(u.fileId)));
+}
+// Splits each file into chunks of about equal size, so parallel calls finish at about the same time.
+function makeChunks(units, maxChars, maxUnits) {
+  const byFile = new Map();
+  units.forEach(u => { if (!byFile.has(u.fileId)) byFile.set(u.fileId, []); byFile.get(u.fileId).push(u); });
+  const chunks = [];
+  for (const list of byFile.values()) {
+    const lens = list.map(u => unitText(u).length + 60);
+    const total = lens.reduce((a, b) => a + b, 0);
+    const split = k => {
+      const groups = Array.from({ length: k }, () => []);
+      let acc = 0;
+      list.forEach((u, i) => { groups[Math.min(k - 1, Math.floor((acc + lens[i] / 2) / (total / k)))].push(u); acc += lens[i]; });
+      return groups.filter(g => g.length);
+    };
+    // Raise the number of chunks until every chunk respects the slide limit, instead of cutting off small remainders.
+    let k = Math.max(1, Math.ceil(total / maxChars), Math.ceil(list.length / maxUnits));
+    let groups = split(k);
+    while (groups.some(g => g.length > maxUnits) && k < list.length) groups = split(++k);
+    for (const g of groups) chunks.push({ fileId: g[0].fileId, fileName: g[0].fileName, units: g, chars: g.reduce((a, u) => a + unitText(u).length + 60, 0) });
+  }
+  return chunks;
+}
+function chunkLabel(c) {
+  const a = c.units[0], b = c.units[c.units.length - 1];
+  const plural = { Folie: 'Folien', Seite: 'Seiten', Abschnitt: 'Abschnitte' }[a.kind] || 'Teile';
+  return `${c.fileName} · ${a === b ? a.label : `${plural} ${a.num}–${b.num}`}`;
+}
+function materialBlock(units) {
+  return units.map(u => `=== ${u.fileName} · ${u.label} ===\n${unitText(u) || '(kein extrahierbarer Text, siehe Folienbild)'}`).join('\n\n');
+}
+// One rendering per slide serves both Claude (image input) and the Anki export.
+const slideCache = new Map();
+function renderSlide(fileId, num) {
+  const key = fileId + ':' + num;
+  if (!slideCache.has(key)) slideCache.set(key, drawSlide(fileId, num, 1100).catch(() => { slideCache.delete(key); return null; }));
+  return slideCache.get(key);
+}
+async function drawSlide(fileId, num, width) {
+  const doc = pdfDocs.get(fileId);
+  if (!doc) return null;
+  const page = await doc.getPage(num);
+  const vp1 = page.getViewport({ scale: 1 });
+  const vp = page.getViewport({ scale: Math.min(3, width / vp1.width) });
+  const c = document.createElement('canvas');
+  c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, c.width, c.height);
+  // 'print' renders without requestAnimationFrame, so it keeps going while the tab is in the background
+  await page.render({ canvasContext: ctx, viewport: vp, intent: 'print' }).promise;
+  page.cleanup();
+  return new Promise(res => c.toBlob(res, 'image/jpeg', 0.72));
+}
+function updateImageOptions() {
+  const anyPdf = state.files.some(f => pdfDocs.has(f.id));
+  const img = $('#opt-images');
+  img.disabled = !anyPdf;
+  if (img.disabled) img.checked = false;
+  $('#opt-images-hint').textContent = anyPdf ? 'Liest auch Diagramme, Abbildungen und gescannte Folien. Langsamer und etwas teurer.' : 'Nur für PDFs, die in dieser Sitzung geladen wurden.';
+  const si = $('#opt-slideimg');
+  si.disabled = !anyPdf;
+  if (si.disabled) si.checked = false;
+}
+
+/* ---------- Kurs / Deckname ---------- */
+function saveMeta() { store.set('meta', { course: $('#course').value, lecture: $('#lecture').value }); }
+function defaultDeckName() {
+  const c = $('#course').value.trim().replace(/::/g, ':'), l = $('#lecture').value.trim().replace(/::/g, ':');
+  return c && l ? `${c}::${l}` : (c || l || 'Lernstudio');
+}
+function syncDeckName() { const d = $('#deck-name'); if (!d.dataset.touched) d.value = defaultDeckName(); }
+const tagSlug = s => String(s || '').trim().replace(/\s+/g, '_').replace(/["']/g, '').slice(0, 60);
+
+/* ---------- Prompts: Karteikarten ---------- */
+const STYLE_RULES = `STIL – abgeleitet aus den bisherigen Anki-Decks des Nutzers (rund 2.700 eigene Karten). Genau so schreiben:
+- Vorderseite: kurze, präzise Frage, meist unter 100 Zeichen. Typische Formen: „Was ist …?“, „Was sind …?“, „Wie funktioniert …?“, „Welche Rolle/Funktion hat …?“, „Nenne die … (Anzahl)“, „Erkläre …“, „Wie unterscheiden sich … und …?“, „Kritik an …?“, „Was zeigte die Studie von … (Jahr)?“. Bei Aufzählungen steht die Anzahl in Klammern am Ende, z. B. „(4)“.
+- Rückseite: Stichpunkte als HTML-Liste <ul><li>…</li></ul>; Abläufe, Phasen, Schritte und Rangfolgen als <ol><li>…</li></ol>. Meist 1–6 Stichpunkte, knapp und stichwortartig statt Fließtext (etwa 100–350 Zeichen). Zentrale Fachbegriffe <b>fett</b>. Folgen und Kausalität mit „→“. Beispiele mit „z. B.“. Fachbegriffe wie in den Folien, Abkürzungen in Klammern.
+- Erlaubtes HTML: <b>, <i>, <ul>, <ol>, <li>, <br>, <sub>, <sup>, <table>, <tr>, <th>, <td>. Kein Markdown, keine anderen Tags.
+- Eine Karte = ein Gedanke (Minimum-Information-Prinzip). Aufzählungen mit mehr als 7 Elementen aufteilen: eine Überblickskarte mit den Oberbegriffen plus Detailkarten.
+- Frage und Antwort müssen ohne die Folie verständlich sein. Kontext gehört in die Frage, z. B. „Im Rubikonmodell: …“.`;
+const COVER_RULES = `INHALTE, DIE ABGEDECKT WERDEN MÜSSEN (soweit im Material vorhanden):
+- Definitionen und Fachbegriffe
+- Theorien und Modelle: Annahmen, Komponenten, Ablauf, Vorhersagen
+- Studien und Experimente: Autor:innen und Jahr, Fragestellung, Methode/Paradigma, zentraler Befund, Bedeutung
+- Mechanismen, Prozesse und Zusammenhänge (auch Warum- und Wie-Fragen)
+- Vergleiche, Abgrenzungen, Gemeinsamkeiten
+- Kritik, Grenzen, Gegenbefunde
+- Zahlen, Häufigkeiten, Kriterien (z. B. Diagnosekriterien, Prävalenzen), Formeln und ihre Interpretation
+- Klassifikationen, Taxonomien und die Beispiele, die die Vorlesung nennt
+- Alles, was als wichtig markiert ist („Merke“, „Zusammenfassung“, „klausurrelevant“, Hervorhebungen, Sprechernotizen)
+Keine Karten zu Titel-, Gliederungs-, Literatur- oder Organisationsfolien ohne Fachinhalt.`;
+const STYLE_EXAMPLES = `BEISPIELE (nur für Form und Stil, nicht für den Inhalt):
+{"type":"basic","front":"Welche Methoden der Reliabilitätsschätzung gibt es? (4)","back":"<ul><li><b>Retest-Reliabilität</b>: derselbe Test zu zwei Zeitpunkten → Stabilität</li><li><b>Paralleltest-Reliabilität</b>: zwei äquivalente Testformen</li><li><b>Testhalbierung</b> (Split-Half): Korrelation zweier Testhälften</li><li><b>Interne Konsistenz</b>: z. B. Cronbachs α</li></ul>","slide":14,"topic":"Reliabilität"}
+{"type":"basic","front":"Was ist selektive Prävention?","back":"<ul><li>Für Personen mit <b>erhöhtem Risiko</b> (Risikogruppen)</li><li>Gezielte Vorsorge- oder Früherkennungsmaßnahmen</li><li>z. B. Programme für Kinder psychisch kranker Eltern</li></ul>","slide":22,"topic":"Prävention"}
+{"type":"cloze","front":"Die Punktprävalenz gibt den Anteil der Erkrankten {{c1::zu einem bestimmten Zeitpunkt}} an.","back":"","slide":9,"topic":"Epidemiologie"}`;
+function typeRules(o) {
+  return `KARTENTYPEN:
+- "basic": Standardkarte (Frage → Antwort). Der Großteil der Karten.
+${o.reverse ? '- "reverse": Fachbegriff ↔ Definition, wenn beide Richtungen prüfungsrelevant sind (z. B. anatomische Begriffe, Abkürzungen, Fachterminologie). "front" = Begriff, "back" = kurze Definition. Sparsam einsetzen.' : '- Verwende KEINE "reverse"-Karten.'}
+${o.cloze ? '- "cloze": Lückentext für feste Definitionen, Zahlen, Formeln und Merksätze. "front" enthält den Satz mit {{c1::Lücke}}; mehrere unabhängige Lücken als {{c1::…}}, {{c2::…}}. Pro Lücke ein Schlüsselbegriff, nie halbe Sätze. "back" ist ein optionaler Zusatz oder "".' : '- Verwende KEINE "cloze"-Karten.'}`;
+}
+function langRule(o) {
+  return { auto: 'Schreibe in der Sprache der jeweiligen Folien: deutsche Folien → deutsche Karten, englische Folien → englische Karten.', de: 'Schreibe auf Deutsch. Stehen die Folien auf Englisch, ergänze den englischen Fachbegriff in Klammern.', en: 'Write the cards in English.' }[o.lang];
+}
+function densityRule(o) {
+  return { kompakt: 'Kompakt: nur die Kernkonzepte, etwa 1 Karte pro inhaltlicher Folie; Details zusammenfassen.', vollstaendig: 'Vollständig: jede prüfungsrelevante Aussage, etwa 1–3 Karten pro inhaltlicher Folie. Lieber eine Karte mehr als eine Lücke.', maximal: 'Maximal: zusätzlich Detailwissen und Verständnisfragen (Warum? Wie hängt … zusammen? Was folgt daraus?), etwa 2–4 Karten pro inhaltlicher Folie.' }[o.density];
+}
+function courseLine() {
+  const c = $('#course').value.trim(), l = $('#lecture').value.trim();
+  return `Kurs: ${c || '(nicht angegeben)'}\nVorlesung: ${l || '(nicht angegeben)'}`;
+}
+function cardPrompt(chunk, idx, total, o, withImages) {
+  return `Du erstellst Anki-Karteikarten aus Vorlesungsmaterial für ein Psychologie-Studium. Ziel ist eine 1,0 in der Klausur: Jeder prüfungsrelevante Inhalt des Materials muss durch mindestens eine Karte abgedeckt sein.
+
+${courseLine()}
+Ausschnitt: Teil ${idx + 1} von ${total} (${chunkLabel(chunk)}). Erstelle Karten nur für diesen Ausschnitt.
+
+${STYLE_RULES}
+
+${typeRules(o)}
+
+${COVER_RULES}
+
+REGELN:
+- Nutze nur Inhalte aus dem Material. Erfinde keine Fakten, Studien, Jahreszahlen oder Zahlen. Enthält eine Folie nur Stichworte, bleib nah an diesen Stichworten.
+- "slide": die Nummer N aus der Überschrift „=== Datei · Folie N ===“ (bzw. Seite/Abschnitt N), aus der die Karte stammt.
+- "topic": Unterthema in 1–4 Wörtern; für alle Karten zum selben Thema gleich geschrieben.
+- Reihenfolge der Karten = Reihenfolge im Material.
+- Sprache: ${langRule(o)}
+- Umfang: ${densityRule(o)}
+${withImages ? '- Zu jeder Folie ist ein Bild angehängt, in derselben Reihenfolge wie die Folien im Material. Nutze die Bilder für Diagramme, Abbildungen, Tabellen und Text, der im extrahierten Folientext fehlt.\n' : ''}
+ANFORDERUNGEN DES NUTZERS (haben Vorrang vor den Stilregeln):
+${o.req || '(keine)'}
+
+${STYLE_EXAMPLES}
+
+AUSGABE: Eine Karte pro Zeile als eigenständiges JSON-Objekt (JSON Lines), ohne umschließendes Array, ohne Codeblock, ohne weiteren Text und ohne Zeilenumbruch innerhalb einer Karte:
+{"type":"basic","front":"…","back":"<ul><li>…</li></ul>","slide":12,"topic":"…"}
+
+MATERIAL:
+${materialBlock(chunk.units)}`;
+}
+function coveragePrompt(group, cardsInGroup, o) {
+  const list = cardsInGroup.map(c => `${c.id} | ${c.slide || '-'} | ${stripHtml(c.front).slice(0, 140)} → ${stripHtml(c.back).slice(0, 100)}`).join('\n');
+  return `Du prüfst ein Anki-Deck auf Vollständigkeit für eine Klausur in einem Psychologie-Studium (Ziel: Note 1,0).
+
+${courseLine()}
+Material: ${chunkLabel(group)}
+
+AUFGABE:
+1. Gehe das Material Folie für Folie durch und vergleiche es mit der Kartenliste. Erstelle neue Karten für jeden prüfungsrelevanten Inhalt, der noch NICHT abgedeckt ist. Erstelle keine Karten zu Inhalten, die schon abgedeckt sind.
+2. Nenne in "duplicates" die IDs von Karten ein, die inhaltlich eine andere Karte der Liste wiederholen (jeweils nur die schwächere der beiden).
+
+${COVER_RULES}
+
+${STYLE_RULES}
+
+${typeRules(o)}
+
+REGELN:
+- Nur Inhalte aus dem Material, nichts erfinden.
+- "slide": die Nummer N aus der Überschrift „=== Datei · Folie N ===“.
+- Sprache: ${langRule(o)}
+
+ANFORDERUNGEN DES NUTZERS (haben Vorrang):
+${o.req || '(keine)'}
+
+KARTENLISTE (ID | Folie | Vorderseite → Rückseite, gekürzt):
+${list || '(noch keine Karten)'}
+
+AUSGABE: JSON Lines, ohne Codeblock, ohne weiteren Text und ohne Zeilenumbruch innerhalb eines Objekts:
+- jede neue Karte als eigenes JSON-Objekt in einer eigenen Zeile: {"type":"basic","front":"…","back":"<ul><li>…</li></ul>","slide":12,"topic":"…"}
+- ganz am Ende genau eine Zeile mit den Dubletten: {"duplicates":["k1a"]} (leere Liste, wenn es keine gibt)
+Fehlt nichts, besteht die Antwort nur aus der Dubletten-Zeile.
+
+MATERIAL:
+${materialBlock(group.units)}`;
+}
+
+/* ---------- Karten: Normalisierung ---------- */
+const ALLOWED_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'UL', 'OL', 'LI', 'BR', 'SUB', 'SUP', 'CODE', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH', 'P', 'DIV', 'SPAN']);
+const DROP_TAGS = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'IMG', 'SVG', 'MATH', 'TEMPLATE', 'LINK', 'META', 'VIDEO', 'AUDIO', 'FORM', 'INPUT', 'BUTTON', 'TEXTAREA', 'SELECT']);
+function sanitize(html) {
+  const d = new DOMParser().parseFromString('<div>' + String(html) + '</div>', 'text/html');
+  const root = d.body.firstElementChild;
+  if (!root) return '';
+  (function walk(node) {
+    for (const ch of Array.from(node.childNodes)) {
+      if (ch.nodeType === 1) {
+        if (DROP_TAGS.has(ch.tagName)) { ch.remove(); continue; }
+        walk(ch);
+        if (!ALLOWED_TAGS.has(ch.tagName)) { ch.replaceWith(...Array.from(ch.childNodes)); continue; }
+        for (const a of Array.from(ch.attributes)) ch.removeAttribute(a.name);
+      } else if (ch.nodeType !== 3) ch.remove();
+    }
+  })(root);
+  return root.innerHTML.replace(/\x1f/g, ' ').trim();
+}
+const CLOZE_RE = /\{\{c(\d+)::([\s\S]*?)(?:::([\s\S]*?))?\}\}/g;
+const hasCloze = s => /\{\{c\d+::[\s\S]*?\}\}/.test(s);
+function clozeOrds(text) {
+  const s = new Set();
+  for (const m of String(text).matchAll(CLOZE_RE)) { const n = parseInt(m[1], 10); if (n > 0) s.add(n - 1); }
+  return s.size ? Array.from(s).sort((a, b) => a - b) : [0];
+}
+function clozeToBasic(front, back) {
+  const answers = Array.from(front.matchAll(CLOZE_RE), m => m[2]);
+  return { front: front.replace(CLOZE_RE, '___'), back: '<ul>' + answers.map(a => `<li>${a}</li>`).join('') + '</ul>' + (back || '') };
+}
+function normalizeCards(arr, chunk, o, markNew) {
+  if (!Array.isArray(arr)) throw { code: 'bad_shape' };
+  const nums = chunk.units.map(u => u.num);
+  const out = [];
+  for (const r of arr) {
+    if (!r || typeof r !== 'object') continue;
+    let type = ['basic', 'reverse', 'cloze'].includes(r.type) ? r.type : 'basic';
+    let front = sanitize(r.front || ''), back = sanitize(r.back || '');
+    if (type === 'reverse' && !o.reverse) type = 'basic';
+    if (type === 'cloze' && (!o.cloze || !hasCloze(front))) {
+      if (hasCloze(front)) ({ front, back } = clozeToBasic(front, back));
+      type = 'basic';
+    }
+    if (type !== 'cloze' && hasCloze(front)) ({ front, back } = clozeToBasic(front, back));
+    if (!stripHtml(front) || (type !== 'cloze' && !stripHtml(back))) continue;
+    let slide = parseInt(r.slide, 10);
+    if (!nums.includes(slide)) slide = Number.isFinite(slide) ? nums.reduce((b, n) => Math.abs(n - slide) < Math.abs(b - slide) ? n : b, nums[0]) : nums[0];
+    out.push({ id: newId('k'), guid: newGuid(), type, front, back, fileId: chunk.fileId, fileName: chunk.fileName, slide, topic: String(r.topic || '').replace(/\s+/g, ' ').trim().slice(0, 60), added: !!markNew });
+  }
+  return out;
+}
+function sortCards() {
+  const fileOrder = new Map(state.files.map((f, i) => [f.id, i]));
+  state.cards.forEach((c, i) => { c._i = i; });
+  state.cards.sort((a, b) => ((fileOrder.get(a.fileId) ?? 999) - (fileOrder.get(b.fileId) ?? 999)) || ((a.slide || 0) - (b.slide || 0)) || (a._i - b._i));
+  state.cards.forEach(c => { delete c._i; });
+}
+
+/* ---------- Karten: Ablauf ---------- */
+let cardCtl = null;
+let cardJobs = [];
+function readCardOpts() {
+  return {
+    density: ($('input[name=density]:checked') || {}).value || 'vollstaendig',
+    reverse: $('#opt-reverse').checked,
+    cloze: $('#opt-cloze').checked,
+    lang: $('#opt-lang').value,
+    tier: $('#opt-tier').value,
+    images: $('#opt-images').checked && caps.imageMax > 0,
+    coverage: $('#opt-coverage').checked,
+    req: $('#card-req').value.trim(),
+  };
+}
+function saveCardSettings() {
+  const o = readCardOpts(); delete o.images;
+  store.set('cardOpts', o);
+}
+function renderProgress(listSel, jobs, onRetry) {
+  $(listSel).replaceChildren(...jobs.map(j => el('li', { class: 'prow', 'data-s': j.status },
+    el('span', { class: 'dot', 'aria-hidden': 'true' }),
+    el('span', { text: j.label }),
+    el('span', { class: 'mono muted' }, j.status === 'fertig' ? j.done : j.status === 'fehler' ? '' : j.status === 'läuft' && j.live ? 'läuft · ' + j.live : j.status),
+    j.status === 'fehler' ? el('span', { class: 'perr' }, j.err + ' ', el('button', { type: 'button', class: 'btn small', onclick: () => onRetry(j) }, 'Erneut versuchen')) : null)));
+}
+async function chunkImages(chunk) {
+  const blobs = await Promise.all(chunk.units.map(u => renderSlide(u.fileId, u.num)));
+  return blobs.every(Boolean) ? blobs : null;
+}
+// Streaming adds cards several times a second; the deck view redraws at most every 300 ms.
+let deckTimer = 0;
+function scheduleDeckRender() {
+  if (deckTimer) return;
+  deckTimer = setTimeout(() => { deckTimer = 0; sortCards(); renderDeck(true); paintCardProgress(); }, 300);
+}
+async function runCardJob(job, total, o) {
+  job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0;
+  state.cards = state.cards.filter(c => c.job !== job.key);
+  paintCardProgress(); scheduleDeckRender();
+  try {
+    const images = o.images ? await chunkImages(job.chunk) : null;
+    const res = await streamItems(cardPrompt(job.chunk, job.idx, total, o, !!images), {
+      tier: o.tier, effort: EFFORT.cards, signal: cardCtl.signal, images,
+      onItem: r => {
+        const c = normalizeCards([r], job.chunk, o, false)[0];
+        if (!c) return;
+        c.job = job.key; state.cards.push(c);
+        job.n++; job.live = job.n + ' Karten';
+        scheduleDeckRender();
+      },
+    });
+    if (!job.n) throw { code: 'bad_shape' };
+    job.status = 'fertig'; job.done = job.n + ' Karten' + (res.truncated ? ' (gekürzt, Lückensuche ergänzt den Rest)' : '');
+  } catch (e) {
+    // Cards that streamed in before a failure are complete and stay; a refusal withdraws them.
+    if (e && e.code === 'refused') state.cards = state.cards.filter(c => c.job !== job.key);
+    if (e && e.code === 'cancelled') job.status = 'abgebrochen';
+    else { job.status = 'fehler'; job.err = errText(e) + (job.n && e.code !== 'refused' ? ` (${job.n} Karten sind schon da)` : ''); if (e && FATAL.has(e.code)) { cardCtl.fatal = job.err; cardCtl.abort(); } }
+  }
+  sortCards(); saveCards(); renderDeck(true); paintCardProgress();
+}
+function paintCardProgress() { renderProgress('#card-progress', cardJobs, retryCardJob); }
+async function retryCardJob(job) {
+  if (job.kind === 'cov') return runCoverage();
+  if (!cardCtl || cardCtl.signal.aborted) cardCtl = new AbortController();
+  setCardBusy(true);
+  await runCardJob(job, cardJobs.filter(j => j.kind === 'gen').length, job.opts);
+  setCardBusy(false);
+}
+function setCardBusy(b) {
+  $('#gen-cards').disabled = b; $('#stop-cards').hidden = !b; $('#run-coverage').disabled = b; $('#export-apkg').disabled = b;
+}
+function prefetchExportLib() { idle(() => loadScript(CDN.sql).catch(() => {})); }
+async function generateCards() {
+  const msg = $('#gen-cards-msg');
+  msg.textContent = '';
+  if (!state.units.length) { msg.textContent = 'Lade zuerst links Vorlesungsmaterial.'; return; }
+  if (!hasKey()) { msg.textContent = errText({ code: 'no_key' }); focusKey(); return; }
+  const o = readCardOpts(); saveCardSettings();
+  const per = o.density === 'maximal' ? 6 : o.density === 'kompakt' ? 12 : 8;
+  const maxChars = o.density === 'maximal' ? 5000 : o.density === 'kompakt' ? 12000 : 7000;
+  const maxUnits = o.images ? Math.max(1, Math.min(per, caps.imageMax)) : per;
+  const chunks = makeChunks(usableUnits(o.images), maxChars, maxUnits);
+  if (!chunks.length) { msg.textContent = 'Im Material wurde kein Text gefunden. Aktiviere „Folienbilder mitsenden“ für gescannte PDFs.'; return; }
+  const t0 = Date.now(), cost0 = usage.cost;
+  state.cards = []; saveCards(); renderDeck();
+  cardCtl = new AbortController();
+  cardJobs = chunks.map((chunk, idx) => ({ kind: 'gen', key: 'g' + idx + '-' + t0, chunk, idx, label: chunkLabel(chunk), status: 'wartet', opts: o }));
+  paintCardProgress(); setCardBusy(true); prefetchExportLib();
+  // Render slide images in chunk order in the background, so the first chunk's images are ready first.
+  if (o.images) (async () => { for (const c of chunks) for (const u of c.units) await renderSlide(u.fileId, u.num); })();
+  await runPool(cardJobs, POOL, cardCtl.signal, job => runCardJob(job, chunks.length, o));
+  paintCardProgress();
+  const failed = cardJobs.filter(j => j.status !== 'fertig').length;
+  if (!cardCtl.signal.aborted && !failed && o.coverage && state.cards.length) await runCoverage(true);
+  setCardBusy(false);
+  const secs = Math.round((Date.now() - t0) / 1000);
+  msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${state.cards.length} Karten in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}${costNote(cost0)}.`;
+}
+async function runCoverage(fromGenerate) {
+  if (!state.cards.length || !state.units.length) return;
+  if (!hasKey()) { $('#gen-cards-msg').textContent = errText({ code: 'no_key' }); focusKey(); return; }
+  const o = Object.assign(readCardOpts(), { images: false });
+  if (!fromGenerate) { cardCtl = new AbortController(); setCardBusy(true); }
+  cardJobs = cardJobs.filter(j => j.kind !== 'cov');
+  // Smaller groups than before, so several checks run in parallel instead of one long one.
+  const groups = makeChunks(usableUnits(false), 16000, 30);
+  const jobs = groups.map((g, i) => ({ kind: 'cov', key: 'c' + i + '-' + Date.now(), group: g, label: 'Abdeckung prüfen · ' + chunkLabel(g), status: 'wartet' }));
+  cardJobs.push(...jobs); paintCardProgress();
+  await runPool(jobs, POOL, cardCtl.signal, async job => {
+    job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0; paintCardProgress();
+    const g = job.group;
+    const lo = g.units[0].num, hi = g.units[g.units.length - 1].num;
+    const inGroup = state.cards.filter(c => c.fileId === g.fileId && c.slide >= lo && c.slide <= hi);
+    const ids = new Set(inGroup.map(c => c.id));
+    let dupes = 0;
+    try {
+      await streamItems(coveragePrompt(g, inGroup, o), {
+        tier: o.tier, effort: EFFORT.coverage, signal: cardCtl.signal,
+        onItem: r => {
+          if (Array.isArray(r.duplicates)) {
+            r.duplicates.map(String).forEach(id => { if (ids.has(id)) { const c = state.cards.find(x => x.id === id); if (c && !c.dupe) { c.dupe = true; dupes++; } } });
+          } else {
+            const c = normalizeCards([r], g, o, true)[0];
+            if (!c) return;
+            c.job = job.key; state.cards.push(c); job.n++;
+          }
+          job.live = `+${job.n} ergänzt`;
+          scheduleDeckRender();
+        },
+      });
+      job.status = 'fertig';
+      job.done = `+${job.n} ergänzt` + (dupes ? ` · ${dupes} Dubletten` : '');
+    } catch (e) {
+      if (e && e.code === 'refused') state.cards = state.cards.filter(c => c.job !== job.key);
+      if (e && e.code === 'cancelled') job.status = 'abgebrochen';
+      else { job.status = 'fehler'; job.err = errText(e); if (e && FATAL.has(e.code)) { cardCtl.fatal = job.err; cardCtl.abort(); } }
+    }
+    sortCards(); saveCards(); renderDeck(true); paintCardProgress();
+  });
+  if (!fromGenerate) {
+    setCardBusy(false);
+    const added = state.cards.filter(c => c.added).length;
+    $('#gen-cards-msg').textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : `Abdeckung geprüft. ${added} ergänzte Karten im Deck.`;
+  }
+}
+
+/* ---------- Deck-Ansicht ---------- */
+const TYPE_LABEL = { basic: 'Frage – Antwort', reverse: 'Umkehrkarte', cloze: 'Lückentext' };
+const view = { slide: null, search: '', editing: null };
+function clozeHtml(text, reveal) {
+  return text.replace(CLOZE_RE, (m, n, a, hint) => `<span class="cloze">${reveal ? a : '[' + (hint || '…') + ']'}</span>`);
+}
+function renderDeck(soft) {
+  const has = state.cards.length > 0;
+  $('#deck-empty').hidden = has;
+  $('#deck-body').hidden = !has;
+  const s = { basic: 0, reverse: 0, cloze: 0 };
+  state.cards.forEach(c => { s[c.type] = (s[c.type] || 0) + 1; });
+  const dupes = state.cards.filter(c => c.dupe).length;
+  const added = state.cards.filter(c => c.added).length;
+  $('#deck-stats').replaceChildren(...(has ? [
+    el('span', {}, el('b', { text: state.cards.length }), ' Karten'),
+    el('span', {}, el('b', { text: s.basic }), ' Frage – Antwort'),
+    s.reverse ? el('span', {}, el('b', { text: s.reverse }), ' Umkehr') : null,
+    s.cloze ? el('span', {}, el('b', { text: s.cloze }), ' Lückentext') : null,
+    added ? el('span', {}, el('b', { text: added }), ' ergänzt') : null,
+  ] : []));
+  $('#drop-dupes').hidden = !dupes;
+  $('#drop-dupes').textContent = `Dubletten entfernen (${dupes})`;
+  if (!has) return;
+  renderCoverage();
+  if (!(soft && view.editing)) renderCardList();
+}
+function renderCoverage() {
+  const wrap = $('#coverage');
+  const counts = new Map();
+  state.cards.forEach(c => { const k = c.fileId + ':' + c.slide; counts.set(k, (counts.get(k) || 0) + 1); });
+  const files = state.files.filter(f => f.status === 'ok' && state.units.some(u => u.fileId === f.id));
+  if (!files.length) { wrap.replaceChildren(); return; }
+  let content = 0, covered = 0;
+  const blocks = files.map(f => {
+    const units = state.units.filter(u => u.fileId === f.id);
+    const cells = units.map(u => {
+      const n = counts.get(f.id + ':' + u.num) || 0;
+      const empty = unitText(u).length < 20 && !n;
+      if (!empty) { content++; if (n) covered++; }
+      const cls = 'cell ' + (n ? 'has' : empty ? 'empty' : 'miss') + (view.slide === f.id + ':' + u.num ? ' sel' : '');
+      const label = `${u.label}: ${n ? n + (n === 1 ? ' Karte' : ' Karten') : empty ? 'kaum Text' : 'keine Karte'}`;
+      return el('button', { type: 'button', class: cls, title: label, 'aria-label': label, disabled: empty || null,
+        onclick: () => { view.slide = view.slide === f.id + ':' + u.num ? null : f.id + ':' + u.num; renderCoverage(); renderCardList(); } });
+    });
+    return el('div', { class: 'cov-file' }, el('span', { class: 'cov-label', text: f.name }), el('div', { class: 'cells' }, cells));
+  });
+  wrap.replaceChildren(
+    el('div', { class: 'panel-head' }, el('h3', { text: 'Folienabdeckung' }), el('span', { class: 'mono muted', text: `${covered}/${content} Inhaltsfolien mit Karte` })),
+    ...blocks,
+    el('div', { class: 'legend' }, el('span', {}, el('i', { class: 'has' }), 'hat Karten'), el('span', {}, el('i', { class: 'miss' }), 'ohne Karte'), el('span', {}, el('i', {}), 'kaum Text'), el('span', { text: 'Foliennummer = Seite im PDF. Klick auf eine Folie filtert die Karten.' })));
+}
+function filteredCards() {
+  const q = view.search.toLowerCase();
+  return state.cards.filter(c => {
+    if (view.slide && c.fileId + ':' + c.slide !== view.slide) return false;
+    if (q && !(stripHtml(c.front) + ' ' + stripHtml(c.back) + ' ' + c.topic).toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+function renderCardList() {
+  const list = filteredCards();
+  const note = $('#filter-note');
+  const parts = [];
+  if (view.slide) { const [fid, num] = view.slide.split(':'); const f = state.files.find(x => String(x.id) === fid); parts.push(`${f ? f.name + ' · ' : ''}Folie ${num}`); }
+  if (view.search) parts.push(`Suche „${view.search}“`);
+  note.hidden = !parts.length;
+  if (parts.length) note.replaceChildren(`${list.length} von ${state.cards.length} Karten · ${parts.join(' · ')} `, el('button', { type: 'button', class: 'btn small ghost', onclick: () => { view.slide = null; view.search = ''; $('#card-search').value = ''; renderCoverage(); renderCardList(); } }, 'Filter aufheben'));
+  const shown = list.slice(0, 400);
+  $('#card-list').replaceChildren(...shown.map(c => view.editing === c.id ? cardEditor(c) : cardView(c)),
+    list.length > shown.length ? el('p', { class: 'hint', text: `${list.length - shown.length} weitere Karten ausgeblendet. Nutze Suche oder Folienfilter.` }) : null);
+}
+function cardView(c) {
+  const front = c.type === 'cloze' ? clozeHtml(c.front, false) : c.front;
+  const back = c.type === 'cloze' ? clozeHtml(c.front, true) + (c.back ? '<br>' + c.back : '') : c.back;
+  return el('article', { class: 'icard' },
+    el('div', { class: 'icard-meta' },
+      c.slide ? el('span', { class: 'chip', text: 'Folie ' + c.slide }) : null,
+      el('span', { class: 'chip type', text: TYPE_LABEL[c.type] }),
+      c.added ? el('span', { class: 'chip new', text: 'ergänzt' }) : null,
+      c.dupe ? el('span', { class: 'chip warn', text: 'mögliche Dublette' }) : null,
+      c.topic ? el('span', { class: 'topic', text: c.topic }) : null),
+    el('div', { class: 'icard-front', html: front }),
+    el('div', { class: 'icard-back', html: back }),
+    el('div', { class: 'icard-actions' },
+      el('button', { type: 'button', class: 'btn small ghost', onclick: () => { view.editing = c.id; renderCardList(); } }, 'Bearbeiten'),
+      el('button', { type: 'button', class: 'btn small ghost danger', onclick: () => { state.cards = state.cards.filter(x => x.id !== c.id); saveCards(); renderDeck(); } }, 'Löschen')));
+}
+function cardEditor(c) {
+  const id = 'ed-' + c.id;
+  const typeSel = el('select', { id: id + '-type' }, ...Object.entries(TYPE_LABEL).map(([v, t]) => el('option', { value: v, selected: v === c.type || null }, t)));
+  const front = el('textarea', { id: id + '-front', rows: 2 }); front.value = c.front;
+  const back = el('textarea', { id: id + '-back', rows: 5 }); back.value = c.back;
+  const slide = el('input', { type: 'number', id: id + '-slide', min: 1 }); slide.value = c.slide || '';
+  const topic = el('input', { type: 'text', id: id + '-topic' }); topic.value = c.topic || '';
+  const err = el('p', { class: 'msg err', role: 'status' });
+  return el('article', { class: 'icard' }, el('div', { class: 'icard-edit' },
+    el('div', { class: 'row' },
+      el('label', {}, el('span', { class: 'lbl', text: 'Kartentyp' }), typeSel),
+      el('label', {}, el('span', { class: 'lbl', text: 'Folie' }), slide),
+      el('label', {}, el('span', { class: 'lbl', text: 'Thema' }), topic)),
+    el('label', {}, el('span', { class: 'lbl', text: 'Vorderseite (bei Lückentext mit {{c1::…}})' }), front),
+    el('label', {}, el('span', { class: 'lbl', text: 'Rückseite (HTML erlaubt: <b>, <ul><li> …)' }), back),
+    err,
+    el('div', { class: 'actions' },
+      el('button', { type: 'button', class: 'btn small primary', onclick: () => {
+        const t = typeSel.value, f = sanitize(front.value), b = sanitize(back.value);
+        if (!stripHtml(f)) { err.textContent = 'Die Vorderseite ist leer.'; return; }
+        if (t === 'cloze' && !hasCloze(f)) { err.textContent = 'Ein Lückentext braucht mindestens eine Lücke wie {{c1::Begriff}}.'; return; }
+        if (t !== 'cloze' && !stripHtml(b)) { err.textContent = 'Die Rückseite ist leer.'; return; }
+        Object.assign(c, { type: t, front: f, back: b, slide: parseInt(slide.value, 10) || null, topic: topic.value.trim() });
+        delete c.dupe; delete c.draft; view.editing = null; sortCards(); saveCards(); renderDeck();
+      } }, 'Speichern'),
+      el('button', { type: 'button', class: 'btn small', onclick: () => {
+        if (c.draft) state.cards = state.cards.filter(x => x.id !== c.id);
+        view.editing = null; renderDeck();
+      } }, 'Abbrechen'))));
+}
+function addCard() {
+  const f = state.files.find(x => x.status === 'ok');
+  const c = { id: newId('k'), guid: newGuid(), type: 'basic', front: '', back: '', fileId: f ? f.id : null, fileName: f ? f.name : '', slide: view.slide ? parseInt(view.slide.split(':')[1], 10) : null, topic: '', draft: true };
+  state.cards.unshift(c); view.editing = c.id; view.search = ''; $('#card-search').value = '';
+  renderDeck();
+  const ta = document.getElementById('ed-' + c.id + '-front'); if (ta) ta.focus();
+}
+
+/* ---------- Anki-Export (.apkg, Schema 11 wie genanki) ---------- */
+const ANKI_SCHEMA = `CREATE TABLE col (id integer primary key, crt integer not null, mod integer not null, scm integer not null, ver integer not null, dty integer not null, usn integer not null, ls integer not null, conf text not null, models text not null, decks text not null, dconf text not null, tags text not null);
+CREATE TABLE notes (id integer primary key, guid text not null, mid integer not null, mod integer not null, usn integer not null, tags text not null, flds text not null, sfld integer not null, csum integer not null, flags integer not null, data text not null);
+CREATE TABLE cards (id integer primary key, nid integer not null, did integer not null, ord integer not null, mod integer not null, usn integer not null, type integer not null, queue integer not null, due integer not null, ivl integer not null, factor integer not null, reps integer not null, lapses integer not null, left integer not null, odue integer not null, odid integer not null, flags integer not null, data text not null);
+CREATE TABLE revlog (id integer primary key, cid integer not null, usn integer not null, ease integer not null, ivl integer not null, lastIvl integer not null, factor integer not null, time integer not null, type integer not null);
+CREATE TABLE graves (usn integer not null, oid integer not null, type integer not null);
+CREATE INDEX ix_notes_usn on notes (usn);
+CREATE INDEX ix_cards_usn on cards (usn);
+CREATE INDEX ix_revlog_usn on revlog (usn);
+CREATE INDEX ix_cards_nid on cards (nid);
+CREATE INDEX ix_cards_sched on cards (did, queue, due);
+CREATE INDEX ix_revlog_cid on revlog (cid);
+CREATE INDEX ix_notes_csum on notes (csum);`;
+const MODEL_IDS = { basic: 1760967101011, reverse: 1760967101022, cloze: 1760967101033 };
+const CARD_CSS = `.card{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:19px;line-height:1.45;color:#1d2330;background:#fff;text-align:left;padding:10px}
+.q{font-weight:600}
+.a ul,.a ol,.q ul,.q ol{margin:4px 0 4px 1.2em;padding:0}
+.cloze{font-weight:700;color:#2446a6}
+table{border-collapse:collapse;font-size:16px;margin:6px 0}td,th{border:1px solid #bbb;padding:3px 6px;vertical-align:top}th{background:#e8edf8}
+.img img{max-width:100%;margin-top:12px;border:1px solid #ddd}
+.src{margin-top:14px;font-size:12px;color:#8a90a0}
+.night_mode .card,.nightMode .card,.card.nightMode{background:#1d2028;color:#e8eaf0}
+.night_mode .cloze,.nightMode .cloze{color:#9db3f5}
+.night_mode th,.nightMode th{background:#2b3346}`;
+const LATEX_PRE = '\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage[utf8]{inputenc}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}\n';
+function ankiModels(deckId, nowS) {
+  const fld = (name, ord) => ({ name, ord, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] });
+  const tmpl = (name, ord, qfmt, afmt) => ({ name, ord, qfmt, afmt, did: null, bqfmt: '', bafmt: '', bfont: '', bsize: 0 });
+  const tail = '{{#Bild}}<div class="img">{{Bild}}</div>{{/Bild}}<div class="src">{{Quelle}}{{#Folie}} · Folie {{Folie}}{{/Folie}}</div>';
+  const model = (id, name, type, flds, tmpls, req) => ({ id: String(id), name, type, mod: nowS, usn: -1, sortf: 0, did: deckId, tmpls, flds, css: CARD_CSS, latexPre: LATEX_PRE, latexPost: '\\end{document}', latexsvg: false, req, tags: [], vers: [] });
+  const qaFields = () => ['Vorderseite', 'Rückseite', 'Quelle', 'Folie', 'Bild'].map(fld);
+  const fwd = tmpl('Karte 1', 0, '<div class="q">{{Vorderseite}}</div>', '{{FrontSide}}<hr id="answer"><div class="a">{{Rückseite}}</div>' + tail);
+  return {
+    [MODEL_IDS.basic]: model(MODEL_IDS.basic, 'Lernstudio Einfach (Folie)', 0, qaFields(), [fwd], [[0, 'all', [0]]]),
+    [MODEL_IDS.reverse]: model(MODEL_IDS.reverse, 'Lernstudio Einfach + Umkehrung (Folie)', 0, qaFields(),
+      [Object.assign({}, fwd), tmpl('Karte 2', 1, '<div class="q">{{Rückseite}}</div>', '{{FrontSide}}<hr id="answer"><div class="a">{{Vorderseite}}</div>' + tail)], [[0, 'all', [0]], [1, 'all', [1]]]),
+    [MODEL_IDS.cloze]: model(MODEL_IDS.cloze, 'Lernstudio Lückentext (Folie)', 1, ['Text', 'Extra', 'Quelle', 'Folie', 'Bild'].map(fld),
+      [tmpl('Lückentext', 0, '<div class="q">{{cloze:Text}}</div>', '<div class="q">{{cloze:Text}}</div>{{#Extra}}<hr id="answer"><div class="a">{{Extra}}</div>{{/Extra}}' + tail)], [[0, 'all', [0]]]),
+  };
+}
+function hash53(str, seed = 0) {
+  let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0; i < str.length; i++) { const ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+}
+const deckIdFor = name => 1000000000000 + (hash53('lernstudio-deck:' + name) % 8000000000000);
+async function csumOf(text) {
+  try {
+    const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(text));
+    const b = new Uint8Array(buf);
+    return ((b[0] << 24) >>> 0) + (b[1] << 16) + (b[2] << 8) + b[3];
+  } catch { return 0; }
+}
+async function buildApkg({ deckName, cards, tags, images }) {
+  await loadScript(CDN.sql);
+  if (typeof window.initSqlJs !== 'function') throw new Error('Die Datenbank-Bibliothek konnte nicht geladen werden.');
+  const SQL = await window.initSqlJs();
+  const db = new SQL.Database();
+  try {
+    db.exec(ANKI_SCHEMA);
+    const nowMs = Date.now(), nowS = Math.floor(nowMs / 1000);
+    const parts = deckName.split('::').map(s => s.trim()).filter(Boolean);
+    const fullName = parts.join('::');
+    const decks = { 1: { id: 1, name: 'Default', mod: nowS, usn: -1, lrnToday: [0, 0], revToday: [0, 0], newToday: [0, 0], timeToday: [0, 0], collapsed: false, browserCollapsed: false, desc: '', dyn: 0, conf: 1, extendNew: 0, extendRev: 0 } };
+    for (let i = 1; i <= parts.length; i++) {
+      const name = parts.slice(0, i).join('::');
+      const id = deckIdFor(name);
+      decks[id] = { id, name, mod: nowS, usn: -1, lrnToday: [0, 0], revToday: [0, 0], newToday: [0, 0], timeToday: [0, 0], collapsed: false, browserCollapsed: false, desc: i === parts.length ? 'Erstellt mit dem Vorlesungs-Lernstudio.' : '', dyn: 0, conf: 1, extendNew: 0, extendRev: 0 };
+    }
+    const did = deckIdFor(fullName);
+    const conf = { activeDecks: [1], addToCur: true, collapseTime: 1200, curDeck: 1, curModel: String(MODEL_IDS.basic), dueCounts: true, estTimes: true, newBury: true, newSpread: 0, nextPos: cards.length + 1, sortBackwards: false, sortType: 'noteFld', timeLim: 0 };
+    const dconf = { 1: { id: 1, name: 'Default', autoplay: true, maxTaken: 60, mod: 0, usn: 0, replayq: true, timer: 0,
+      lapse: { delays: [10], leechAction: 0, leechFails: 8, minInt: 1, mult: 0 },
+      new: { bury: true, delays: [1, 10], initialFactor: 2500, ints: [1, 4, 7], order: 1, perDay: 20, separate: true },
+      rev: { bury: true, ease4: 1.3, fuzz: 0.05, ivlFct: 1, maxIvl: 36500, minSpace: 1, perDay: 100 } } };
+    db.run('INSERT INTO col VALUES (1,?,?,?,11,0,0,0,?,?,?,?,?)', [nowS - (nowS % 86400), nowMs, nowMs, JSON.stringify(conf), JSON.stringify(ankiModels(did, nowS)), JSON.stringify(decks), JSON.stringify(dconf), '{}']);
+    const insN = db.prepare('INSERT INTO notes VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+    const insC = db.prepare('INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+    let nid = nowMs, cid = nowMs, due = 0;
+    for (const c of cards) {
+      due++;
+      const mid = MODEL_IDS[c.type] || MODEL_IDS.basic;
+      const quelle = c.fileName ? escapeHtml(c.fileName.replace(/\.[^.]+$/, '')) : '';
+      const bild = images && images.has(c.fileId + ':' + c.slide) ? `<img src="${images.get(c.fileId + ':' + c.slide)}">` : '';
+      const flds = [c.front, c.back || '', quelle, c.slide ? String(c.slide) : '', bild].map(f => String(f).replace(/\x1f/g, ' '));
+      const sfld = stripHtml(flds[0]);
+      const noteTags = [...tags, tagSlug(c.topic)].filter(Boolean);
+      insN.run([++nid, c.guid || newGuid(), mid, nowS, -1, noteTags.length ? ' ' + Array.from(new Set(noteTags)).join(' ') + ' ' : '', flds.join('\x1f'), sfld, await csumOf(sfld), 0, '']);
+      const ords = c.type === 'cloze' ? clozeOrds(c.front) : c.type === 'reverse' ? [0, 1] : [0];
+      for (const ord of ords) insC.run([++cid, nid, did, ord, nowS, -1, 0, 0, due, 0, 0, 0, 0, 0, 0, 0, 0, '']);
+    }
+    insN.free(); insC.free();
+    return db.export();
+  } finally { db.close(); }
+}
+async function packageApkg({ deckName, cards, tags, withImages, onStep }) {
+  const media = [], images = new Map();
+  if (withImages) {
+    const base = tagSlug(deckName.replace(/::/g, '-')).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'deck';
+    const keys = Array.from(new Set(cards.filter(c => c.slide && pdfDocs.has(c.fileId)).map(c => c.fileId + ':' + c.slide)));
+    for (const [i, k] of keys.entries()) {
+      if (onStep) onStep(`Folienbild ${i + 1} von ${keys.length} wird erstellt …`);
+      const [fid, num] = k.split(':').map(Number);
+      const blob = await renderSlide(fid, num);
+      if (!blob) continue;
+      const name = `lernstudio-${base}-${hash53(deckName).toString(36).slice(0, 6)}-d${fid}-f${num}.jpg`;
+      images.set(k, name);
+      media.push({ name, data: new Uint8Array(await blob.arrayBuffer()) });
+    }
+  }
+  if (onStep) onStep('Anki-Datei wird gebaut …');
+  const col = await buildApkg({ deckName, cards, tags, images });
+  const zip = new window.JSZip();
+  zip.file('collection.anki2', col);
+  const mediaMap = {};
+  media.forEach((m, i) => { mediaMap[String(i)] = m.name; zip.file(String(i), m.data); });
+  zip.file('media', JSON.stringify(mediaMap));
+  return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+}
+const fileSafe = s => String(s).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Anki-Deck';
+async function exportDeck(cards, deckName, withImages, msgEl, extraTag) {
+  msgEl.className = 'msg'; msgEl.textContent = 'Anki-Datei wird gebaut …';
+  try {
+    const tags = [tagSlug($('#course').value), tagSlug($('#lecture').value), extraTag].filter(Boolean);
+    const apkg = await packageApkg({ deckName, cards, tags, withImages, onStep: t => { msgEl.textContent = t; } });
+    const base = fileSafe(deckName.split('::').pop());
+    await saveFile(base + '.apkg', new Blob([apkg], { type: 'application/octet-stream' }));
+    msgEl.className = 'msg ok';
+    msgEl.textContent = `Gespeichert: ${base}.apkg mit ${cards.length} Karten. Ein Doppelklick öffnet sie in Anki.`;
+  } catch (e) {
+    msgEl.className = 'msg err';
+    msgEl.textContent = errText(e);
+  }
+}
+
+/* ---------- Quiz: Prompts ---------- */
+const QTYPE_LABEL = { tf: 'Wahr / Falsch', single: 'Single Choice', multi: 'Multiple Choice', open: 'Offene Frage' };
+function readQuizOpts() {
+  return {
+    types: $$('input[name=qtype]:checked').map(i => i.value),
+    count: Math.max(3, Math.min(60, parseInt($('#q-count').value, 10) || 15)),
+    level: $('#q-level').value,
+    k: parseInt($('#q-k').value, 10) || 5,
+    scoring: $('#q-scoring').value,
+    mode: $('#q-mode').value,
+    tier: $('#q-tier').value,
+    req: $('#quiz-req').value.trim(),
+  };
+}
+function saveQuizSettings() { store.set('quizOpts', readQuizOpts()); }
+function planText(plan, tfTrue) {
+  const parts = [];
+  if (plan.tf) parts.push(`${plan.tf} × Wahr/Falsch (davon ${tfTrue} wahre und ${plan.tf - tfTrue} falsche Aussagen)`);
+  if (plan.single) parts.push(`${plan.single} × Single Choice`);
+  if (plan.multi) parts.push(`${plan.multi} × Multiple Choice`);
+  if (plan.open) parts.push(`${plan.open} × offene Frage`);
+  return parts.join(', ');
+}
+function levelRule(level) {
+  return {
+    gemischt: 'Mische die Stufen: etwa 30 % Erinnern, 30 % Verstehen, 25 % Anwenden, 15 % Analysieren.',
+    grundlagen: 'Schwerpunkt Grundlagen: vor allem Erinnern und Verstehen (Begriffe, Definitionen, zentrale Befunde).',
+    klausur: 'Klausurniveau: vor allem Verstehen, Anwenden und Analysieren. Anwenden z. B. als kurze Fallvignette oder Studienbeschreibung, Analysieren z. B. als Vergleich zweier Theorien oder Bewertung eines Designs.',
+  }[level];
+}
+function quizPrompt(chunk, plan, tfTrue, o) {
+  return `Du erstellst ein Übungsquiz zur Klausurvorbereitung in einem Psychologie-Studium (Ziel: Note 1,0). Halte dich an die Regeln zur Konstruktion von Testaufgaben (Haladyna, Downing & Rodriguez, 2002) und gib elaboriertes Feedback.
+
+${courseLine()}
+Material: ${chunkLabel(chunk)}
+
+ERSTELLE GENAU: ${planText(plan, tfTrue)}.
+
+NIVEAU: ${levelRule(o.level)}
+
+ALLGEMEINE REGELN:
+- Nur Inhalte aus dem Material, nichts erfinden. Jede Frage nennt die Folie ("slide" = Nummer N aus „=== Datei · Folie N ===“).
+- Verteile die Fragen über den gesamten Ausschnitt und frage das Wichtigste ab (Definitionen, Modelle, Studien und Befunde, Unterschiede, Kritik, Anwendung).
+- Jede Frage ist für sich verständlich und eindeutig, prüft genau einen Gedanken und hat eine fachlich eindeutig richtige Lösung. Keine Spitzfindigkeiten.
+- Schreibe in der Sprache des Materials. Nur reiner Text, kein HTML, kein Markdown.
+- "level" ist eine der Stufen Erinnern, Verstehen, Anwenden, Analysieren. "topic": Unterthema in 1–4 Wörtern.
+
+WAHR/FALSCH ("tf"):
+- Genau eine Aussage pro Item. Falsche Aussagen enthalten eine typische Verwechslung oder einen typischen Denkfehler, nicht bloß ein eingefügtes „nicht“.
+- Keine Hinweiswörter wie „immer“, „nie“, „ausschließlich“, „alle“, die die Lösung verraten.
+- "explanation": warum die Aussage stimmt bzw. wie die korrekte Aussage lautet.
+
+SINGLE CHOICE ("single"): genau ${o.k} Optionen, genau eine richtig.
+MULTIPLE CHOICE ("multi"): genau ${o.k} Optionen, davon 1 bis ${o.k - 1} richtig; variiere die Anzahl richtiger Optionen zwischen den Fragen.
+- Fragestamm als klare Frage oder Aufgabe, die auch ohne die Optionen Sinn ergibt.
+- Ablenker sind plausibel: typische Missverständnisse, verwandte Begriffe oder Theorien aus dem Material. Alle Optionen ähnlich lang und grammatisch passend.
+- Kein „Alle/Keine der genannten“. Verneinungen vermeiden; wenn nötig, „NICHT“ in Großbuchstaben.
+- Jede Option ist für sich als richtig oder falsch beurteilbar. "why": ein Satz, warum die Option richtig oder falsch ist.
+
+OFFENE FRAGE ("open"):
+- Klausurtypisch formuliert („Erläutern Sie …“, „Vergleichen Sie …“, „Beschreiben Sie … und nennen Sie ein Beispiel“).
+- "modelAnswer": vollständige Musterlösung in 2–6 Sätzen.
+- "rubric": 2–6 prüfbare Inhaltspunkte mit Punktzahl (meist 1 Punkt je Inhalt).
+
+ANFORDERUNGEN DES NUTZERS (haben Vorrang):
+${o.req || '(keine)'}
+
+AUSGABE: Eine Frage pro Zeile als eigenständiges JSON-Objekt (JSON Lines), ohne umschließendes Array, ohne Codeblock, ohne weiteren Text und ohne Zeilenumbruch innerhalb einer Frage. Nur die angeforderten Typen, in diesen Formen:
+{"type":"tf","statement":"…","answer":true,"explanation":"…","slide":4,"topic":"…","level":"Verstehen"}
+{"type":"single","question":"…","options":[{"text":"…","correct":true,"why":"…"},{"text":"…","correct":false,"why":"…"}],"slide":7,"topic":"…","level":"Anwenden"}
+{"type":"multi","question":"…","options":[{"text":"…","correct":true,"why":"…"},{"text":"…","correct":false,"why":"…"}],"slide":9,"topic":"…","level":"Verstehen"}
+{"type":"open","question":"…","modelAnswer":"…","rubric":[{"point":"…","points":1}],"slide":11,"topic":"…","level":"Analysieren"}
+
+MATERIAL:
+${materialBlock(chunk.units)}`;
+}
+function gradePrompt(q, answer) {
+  const rubric = q.rubric.map((r, i) => `${i + 1}. ${r.point} (${r.points} P.)`).join('\n');
+  return `Bewerte die Antwort auf eine offene Klausurfrage in einem Psychologie-Studium wie eine faire, genaue Korrektorin.
+- Vergib Punkte nur für Rasterpunkte, die inhaltlich korrekt enthalten sind. Sinngemäße Formulierungen in eigenen Worten zählen voll. Halbe Punkte sind erlaubt, wenn ein Punkt nur teilweise erfüllt ist.
+- Fachlich falsche Aussagen kosten keine Punkte, werden aber im Feedback korrigiert.
+- Das Feedback spricht die Person mit „du“ an: was gut war, was fehlt, wie eine volle Antwort aussähe (2–4 Sätze).
+
+FRAGE:
+${q.question}
+
+MUSTERLÖSUNG:
+${q.modelAnswer}
+
+BEWERTUNGSRASTER:
+${rubric}
+
+ANTWORT DER PERSON:
+${answer}
+
+AUSGABE: Antworte ausschließlich mit JSON in genau dieser Form, ein Eintrag je Rasterpunkt in derselben Reihenfolge:
+{"awarded":[{"reached":1,"comment":"…"}],"feedback":"…"}`;
+}
+
+/* ---------- Quiz: Erzeugung ---------- */
+let quizCtl = null, quizJobs = [], pendingQuestions = [], quizCost0 = 0;
+function largestRemainder(total, weights) {
+  const sum = weights.reduce((a, b) => a + b, 0) || 1;
+  const raw = weights.map(w => total * w / sum);
+  const base = raw.map(Math.floor);
+  let rest = total - base.reduce((a, b) => a + b, 0);
+  raw.map((r, i) => [r - base[i], i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (rest > 0) { base[i]++; rest--; } });
+  return base;
+}
+function normalizeQuestions(arr, chunk, o) {
+  if (!Array.isArray(arr)) throw { code: 'bad_shape' };
+  const nums = chunk.units.map(u => u.num);
+  const txt = v => String(v == null ? '' : v).replace(/<[^>]+>/g, '').trim();
+  const out = [];
+  for (const r of arr) {
+    if (!r || typeof r !== 'object') continue;
+    let type = r.type;
+    if (!o.types.includes(type)) continue;
+    let slide = parseInt(r.slide, 10); if (!nums.includes(slide)) slide = Number.isFinite(slide) ? slide : null;
+    const q = { id: newId('q'), type, slide, fileName: chunk.fileName, topic: txt(r.topic).slice(0, 60) || 'Allgemein', level: txt(r.level) || '' };
+    if (type === 'tf') {
+      const ans = r.answer === true || r.answer === 'true' || r.answer === 'wahr' ? true : r.answer === false || r.answer === 'false' || r.answer === 'falsch' ? false : null;
+      if (!txt(r.statement) || ans === null) continue;
+      Object.assign(q, { statement: txt(r.statement), answer: ans, explanation: txt(r.explanation) });
+    } else if (type === 'single' || type === 'multi') {
+      const opts = (Array.isArray(r.options) ? r.options : []).filter(x => x && txt(x.text)).map(x => ({ text: txt(x.text), correct: x.correct === true || x.correct === 'true', why: txt(x.why) }));
+      const nc = opts.filter(x => x.correct).length;
+      if (!txt(r.question) || opts.length < 3) continue;
+      if (type === 'single' && nc !== 1) { if (nc > 1 && nc < opts.length && o.types.includes('multi')) type = q.type = 'multi'; else continue; }
+      if (type === 'multi' && (nc < 1 || nc >= opts.length)) continue;
+      Object.assign(q, { question: txt(r.question), options: shuffle(opts) });
+    } else if (type === 'open') {
+      let rubric = (Array.isArray(r.rubric) ? r.rubric : []).filter(x => x && txt(x.point)).map(x => ({ point: txt(x.point), points: Math.max(0.5, Math.min(5, Number(x.points) || 1)) }));
+      if (!txt(r.question) || !txt(r.modelAnswer)) continue;
+      if (!rubric.length) rubric = [{ point: txt(r.modelAnswer), points: 2 }];
+      Object.assign(q, { question: txt(r.question), modelAnswer: txt(r.modelAnswer), rubric });
+    } else continue;
+    out.push(q);
+  }
+  return out;
+}
+function paintQuizProgress() { renderProgress('#quiz-progress', quizJobs, retryQuizJob); }
+function setQuizBusy(b) { $('#gen-quiz').disabled = b; $('#stop-quiz').hidden = !b; if (b) $('#start-quiz').hidden = true; }
+let quizPaintTimer = 0;
+function scheduleQuizPaint() { if (!quizPaintTimer) quizPaintTimer = setTimeout(() => { quizPaintTimer = 0; paintQuizProgress(); }, 300); }
+async function runQuizJob(job, o) {
+  job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0;
+  pendingQuestions = pendingQuestions.filter(q => q.job !== job.key);
+  paintQuizProgress();
+  try {
+    await streamItems(quizPrompt(job.chunk, job.plan, job.tfTrue, o), {
+      tier: o.tier, effort: EFFORT.quiz, signal: quizCtl.signal,
+      onItem: r => {
+        const q = normalizeQuestions([r], job.chunk, o)[0];
+        if (!q) return;
+        q.job = job.key; pendingQuestions.push(q);
+        job.n++; job.live = job.n + ' Fragen';
+        scheduleQuizPaint();
+      },
+    });
+    if (!job.n) throw { code: 'bad_shape' };
+    job.status = 'fertig'; job.done = job.n + ' Fragen';
+  } catch (e) {
+    if (e && e.code === 'refused') pendingQuestions = pendingQuestions.filter(q => q.job !== job.key);
+    if (e && e.code === 'cancelled') job.status = 'abgebrochen';
+    else { job.status = 'fehler'; job.err = errText(e) + (job.n && e.code !== 'refused' ? ` (${job.n} Fragen sind schon da)` : ''); if (e && FATAL.has(e.code)) { quizCtl.fatal = job.err; quizCtl.abort(); } }
+  }
+  paintQuizProgress();
+}
+async function retryQuizJob(job) {
+  if (!quizCtl || quizCtl.signal.aborted) quizCtl = new AbortController();
+  setQuizBusy(true);
+  await runQuizJob(job, job.opts);
+  setQuizBusy(false);
+  afterQuizGen();
+}
+function afterQuizGen() {
+  const n = pendingQuestions.length;
+  const failed = quizJobs.filter(j => j.status !== 'fertig').length;
+  $('#start-quiz').hidden = !n;
+  $('#start-quiz').textContent = `Quiz mit ${n} Fragen starten`;
+  $('#gen-quiz-msg').textContent = quizCtl && quizCtl.signal.aborted ? (quizCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Teil ist' : 'Teile sind'} fehlgeschlagen.` : n ? `Fertig${costNote(quizCost0)}.` : '';
+}
+async function generateQuiz() {
+  const msg = $('#gen-quiz-msg'); msg.textContent = '';
+  const o = readQuizOpts(); saveQuizSettings();
+  if (!o.types.length) { msg.textContent = 'Wähle mindestens einen Fragetyp.'; return; }
+  if (!state.units.length) { msg.textContent = 'Lade zuerst links Vorlesungsmaterial.'; return; }
+  if (!hasKey()) { msg.textContent = errText({ code: 'no_key' }); focusKey(); return; }
+  // Split into at least as many parts as calls can run at once (each part gets 4 or more questions).
+  const units = usableUnits(false);
+  const total = units.reduce((a, u) => a + unitText(u).length + 60, 0);
+  const parts = Math.max(1, Math.ceil(total / 40000), Math.min(POOL, Math.floor(o.count / 4)));
+  const chunks = makeChunks(units, Math.ceil(total / parts) + 1, 1000);
+  if (!chunks.length) { msg.textContent = 'Im Material wurde kein Text gefunden.'; return; }
+  const quotas = largestRemainder(o.count, chunks.map(c => c.chars));
+  const typeCounts = largestRemainder(o.count, o.types.map(() => 1));
+  const slots = shuffle(o.types.flatMap((t, i) => Array(typeCounts[i]).fill(t)));
+  let pos = 0;
+  const jobs = [];
+  chunks.forEach((chunk, i) => {
+    if (!quotas[i]) return;
+    const plan = { tf: 0, single: 0, multi: 0, open: 0 };
+    slots.slice(pos, pos + quotas[i]).forEach(t => { plan[t]++; });
+    pos += quotas[i];
+    const tfTrue = plan.tf ? (Math.random() < 0.5 ? Math.ceil(plan.tf / 2) : Math.floor(plan.tf / 2)) : 0;
+    jobs.push({ key: 'z' + i + '-' + Date.now(), chunk, plan, tfTrue, opts: o, label: chunkLabel(chunk) + ' · ' + quotas[i] + ' Fragen', status: 'wartet' });
+  });
+  quizCtl = new AbortController(); quizCost0 = usage.cost;
+  quizJobs = jobs; pendingQuestions = [];
+  setQuizBusy(true); paintQuizProgress();
+  await runPool(quizJobs, POOL, quizCtl.signal, job => runQuizJob(job, o));
+  setQuizBusy(false); paintQuizProgress();
+  afterQuizGen();
+  if (pendingQuestions.length && quizJobs.every(j => j.status === 'fertig')) startQuiz();
+}
+function startQuiz() {
+  const o = quizJobs.length ? quizJobs[0].opts : readQuizOpts();
+  const title = $('#lecture').value.trim() || $('#course').value.trim() || 'Quiz';
+  state.quiz = newQuizState(shuffle(pendingQuestions.map(q => { const c = Object.assign({}, q); delete c.job; return c; })), o, title);
+  saveQuiz(); showQuizView();
+}
+function newQuizState(questions, o, title) {
+  return { title, created: new Date().toISOString(), settings: { scoring: o.scoring, mode: o.mode, tier: o.tier, k: o.k }, questions, answers: {}, results: {}, checked: {}, idx: 0, submitted: false };
+}
+
+/* ---------- Quiz: Bewertung ---------- */
+function correctIdx(q) { return q.options.map((x, i) => x.correct ? i : -1).filter(i => i >= 0); }
+function autoScore(q, a, scoring) {
+  if (q.type === 'tf') return { score: a === q.answer ? 1 : 0, max: 1 };
+  if (q.type === 'single') return { score: a != null && q.options[a] && q.options[a].correct ? 1 : 0, max: 1 };
+  if (q.type === 'multi') {
+    const sel = new Set(Array.isArray(a) ? a : []);
+    const right = q.options.filter((x, i) => x.correct === sel.has(i)).length;
+    return { score: scoring === 'partial' ? right / q.options.length : right === q.options.length ? 1 : 0, max: 1 };
+  }
+  return null;
+}
+const maxOf = q => q.type === 'open' ? q.rubric.reduce((a, r) => a + r.points, 0) : 1;
+function resultOf(q) {
+  const qz = state.quiz;
+  if (q.type === 'open') return qz.results[q.id] || null;
+  const a = qz.answers[q.id];
+  return autoScore(q, a, qz.settings.scoring);
+}
+function isAnswered(q) {
+  const a = state.quiz.answers[q.id];
+  if (q.type === 'multi') return Array.isArray(a) && a.length > 0;
+  if (q.type === 'open') return typeof a === 'string' && a.trim().length > 0;
+  return a != null;
+}
+async function gradeOpen(q) {
+  const qz = state.quiz;
+  const ans = String(qz.answers[q.id] || '').trim();
+  const max = maxOf(q);
+  if (!ans) { qz.results[q.id] = { score: 0, max, awarded: q.rubric.map(() => ({ reached: 0, comment: '' })), feedback: 'Keine Antwort abgegeben.' }; saveQuiz(); return; }
+  const res = await askJSON(gradePrompt(q, ans), { tier: 'default', effort: EFFORT.grade });
+  if (!res || !Array.isArray(res.awarded)) throw { code: 'bad_shape' };
+  const awarded = q.rubric.map((r, i) => {
+    const a = res.awarded[i] || {};
+    const reached = Math.max(0, Math.min(r.points, Math.round((Number(a.reached) || 0) * 2) / 2));
+    return { reached, comment: String(a.comment || '').trim() };
+  });
+  qz.results[q.id] = { score: awarded.reduce((s, a) => s + a.reached, 0), max, awarded, feedback: String(res.feedback || '').trim() };
+  saveQuiz();
+}
+
+/* ---------- Quiz: Ansicht ---------- */
+function showQuizView() {
+  const qz = state.quiz;
+  $('#quiz-setup').hidden = !!qz;
+  $('#quiz-run').hidden = !qz || qz.submitted;
+  $('#quiz-result').hidden = !qz || !qz.submitted;
+  if (!qz) return;
+  if (qz.submitted) renderResult(); else renderQuestion();
+}
+function verdictOf(r) {
+  if (!r) return null;
+  if (r.score >= r.max - 1e-9) return 'ok';
+  if (r.score <= 1e-9) return 'bad';
+  return 'part';
+}
+function renderQuestion() {
+  const qz = state.quiz, q = qz.questions[qz.idx];
+  const learn = qz.settings.mode === 'lern';
+  const shown = learn ? !!qz.checked[q.id] : false;
+  const box = $('#quiz-run');
+  const a = qz.answers[q.id];
+  const setAns = v => { qz.answers[q.id] = v; saveQuiz(); };
+  const dots = el('div', { class: 'qdots', role: 'navigation', 'aria-label': 'Fragen' }, ...qz.questions.map((x, i) => {
+    let cls = 'qdot';
+    if (learn && qz.checked[x.id]) cls += ' ' + ({ ok: 'right', bad: 'wrong', part: 'part' }[verdictOf(resultOf(x))] || 'answered');
+    else if (isAnswered(x)) cls += ' answered';
+    if (i === qz.idx) cls += ' cur';
+    return el('button', { type: 'button', class: cls, 'aria-label': 'Frage ' + (i + 1), 'aria-current': i === qz.idx ? 'step' : null, onclick: () => { qz.idx = i; saveQuiz(); renderQuestion(); } }, String(i + 1));
+  }));
+  const head = el('div', { class: 'qhead' },
+    el('div', { class: 'actions' },
+      el('span', { class: 'chip', text: `Frage ${qz.idx + 1} / ${qz.questions.length}` }),
+      el('span', { class: 'chip type', text: QTYPE_LABEL[q.type] }),
+      q.level ? el('span', { class: 'chip', text: q.level }) : null,
+      el('span', { class: 'topic', text: q.topic + (q.slide ? ' · Folie ' + q.slide : '') })),
+    el('button', { type: 'button', class: 'btn small ghost', onclick: e => armConfirm(e.currentTarget, 'Quiz wirklich beenden?', () => { state.quiz = null; saveQuiz(); showQuizView(); }) }, 'Quiz beenden'));
+  let body;
+  const name = 'ans-' + q.id;
+  if (q.type === 'tf') {
+    body = el('div', { class: 'opts', role: 'radiogroup', 'aria-label': 'Antwort' }, ...[true, false].map(v => {
+      let cls = 'opt' + (shown ? ' locked' : '');
+      if (shown) { if (v === q.answer) cls += a === v ? ' correct' : ' missed'; else if (a === v) cls += ' wrong'; }
+      return el('label', { class: cls },
+        el('input', { type: 'radio', name, checked: a === v || null, disabled: shown || null, onchange: () => setAns(v) }),
+        el('span', { class: 'otext', text: v ? 'Wahr' : 'Falsch' }));
+    }));
+  } else if (q.type === 'single' || q.type === 'multi') {
+    const multi = q.type === 'multi';
+    const sel = multi ? new Set(Array.isArray(a) ? a : []) : null;
+    body = el('div', { class: 'opts' }, ...q.options.map((opt, i) => {
+      const picked = multi ? sel.has(i) : a === i;
+      let cls = 'opt' + (shown ? ' locked' : '');
+      if (shown) cls += opt.correct ? (picked ? ' correct' : ' missed') : (picked ? ' wrong' : '');
+      return el('label', { class: cls },
+        el('input', { type: multi ? 'checkbox' : 'radio', name, checked: picked || null, disabled: shown || null, onchange: e => {
+          if (multi) { const s = new Set(Array.isArray(qz.answers[q.id]) ? qz.answers[q.id] : []); e.target.checked ? s.add(i) : s.delete(i); setAns(Array.from(s).sort((x, y) => x - y)); }
+          else setAns(i);
+        } }),
+        el('span', { class: 'otext', text: String.fromCharCode(65 + i) + ') ' + opt.text }),
+        shown && opt.why ? el('span', { class: 'why', text: (opt.correct ? 'Richtig: ' : 'Falsch: ') + opt.why }) : null);
+    }));
+  } else {
+    const ta = el('textarea', { id: name, rows: 7, disabled: shown || null, placeholder: 'Deine Antwort in ganzen Sätzen, wie in der Klausur' });
+    ta.value = typeof a === 'string' ? a : '';
+    let t; ta.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => setAns(ta.value), 300); qz.answers[q.id] = ta.value; });
+    body = el('label', {}, el('span', { class: 'lbl', text: `Deine Antwort (${fmt(maxOf(q))} Punkte)` }), ta);
+  }
+  const instr = q.type === 'multi' ? `Mehrfachauswahl: 1 bis ${q.options.length - 1} Antworten sind richtig.` : q.type === 'single' ? 'Genau eine Antwort ist richtig.' : q.type === 'tf' ? 'Ist die Aussage wahr oder falsch?' : '';
+  const status = el('p', { class: 'msg', role: 'status' });
+  const fb = shown ? feedbackBlock(q) : null;
+  const last = qz.idx === qz.questions.length - 1;
+  const nav = el('div', { class: 'actions' },
+    el('button', { type: 'button', class: 'btn', disabled: qz.idx === 0 || null, onclick: () => { qz.idx--; saveQuiz(); renderQuestion(); } }, 'Zurück'));
+  if (learn && !shown) {
+    nav.append(el('button', { type: 'button', class: 'btn primary', onclick: async e => {
+      if (q.type === 'open') {
+        if (!isAnswered(q)) { status.textContent = 'Schreib zuerst eine Antwort.'; return; }
+        const b = e.currentTarget; b.disabled = true; status.className = 'msg'; status.textContent = 'Claude bewertet deine Antwort …';
+        try { await gradeOpen(q); } catch (err) { b.disabled = false; status.className = 'msg err'; status.textContent = errText(err); return; }
+      } else if (!isAnswered(q)) { status.textContent = 'Wähle zuerst eine Antwort.'; return; }
+      qz.checked[q.id] = true; saveQuiz(); renderQuestion();
+    } }, 'Antwort prüfen'));
+    nav.append(el('button', { type: 'button', class: 'btn ghost', onclick: () => { qz.checked[q.id] = true; if (q.type === 'open' && !qz.results[q.id]) qz.results[q.id] = { score: 0, max: maxOf(q), awarded: q.rubric.map(() => ({ reached: 0, comment: '' })), feedback: 'Übersprungen.' }; saveQuiz(); renderQuestion(); } }, 'Lösung zeigen'));
+  } else if (!last) {
+    nav.append(el('button', { type: 'button', class: 'btn primary', onclick: () => { qz.idx++; saveQuiz(); renderQuestion(); } }, 'Weiter'));
+  }
+  if (last && (!learn || shown)) nav.append(el('button', { type: 'button', class: 'btn primary', onclick: e => submitQuiz(e.currentTarget, status) }, learn ? 'Auswertung' : 'Abgeben'));
+  else if (!learn) nav.append(el('button', { type: 'button', class: 'btn ghost', onclick: e => submitQuiz(e.currentTarget, status) }, 'Abgeben'));
+  box.replaceChildren(head, dots,
+    el('p', { class: 'qtext', text: q.type === 'tf' ? q.statement : q.question }),
+    instr ? el('p', { class: 'qinstr', text: instr }) : null,
+    body, fb, status, nav);
+}
+function feedbackBlock(q) {
+  const r = resultOf(q);
+  const v = verdictOf(r);
+  const vt = { ok: 'Richtig', bad: q.type === 'open' ? 'Noch nicht ausreichend' : 'Falsch', part: 'Teilweise richtig' }[v] || 'Nicht bewertet';
+  const parts = [el('p', {}, el('span', { class: 'verdict ' + (v || 'bad'), text: vt }), r ? el('span', { class: 'mono muted', text: `  ${fmt(r.score)} / ${fmt(r.max)} P.` }) : null)];
+  if (q.type === 'tf') parts.push(el('p', { text: `Die Aussage ist ${q.answer ? 'wahr' : 'falsch'}. ${q.explanation || ''}` }));
+  if (q.type === 'multi' || q.type === 'single') parts.push(el('p', { class: 'hint', text: 'Richtig: ' + correctIdx(q).map(i => String.fromCharCode(65 + i)).join(', ') }));
+  if (q.type === 'open') {
+    if (r && r.awarded) parts.push(el('ul', { class: 'rub' }, ...q.rubric.map((p, i) => el('li', {},
+      el('span', { class: 'pts', text: `${fmt((r.awarded[i] || {}).reached || 0)}/${fmt(p.points)}` }),
+      el('span', { text: p.point }),
+      (r.awarded[i] || {}).comment ? el('span', { class: 'cm', text: r.awarded[i].comment }) : null))));
+    if (r && r.feedback) parts.push(el('p', { text: r.feedback }));
+    parts.push(el('details', {}, el('summary', { class: 'lbl', style: 'cursor:pointer', text: 'Musterlösung' }), el('p', { text: q.modelAnswer })));
+  }
+  return el('div', { class: 'feedback' }, ...parts);
+}
+// Grades several open answers at once; returns the first error, if any.
+async function gradeMany(qs, onProgress) {
+  let done = 0, firstErr = null;
+  const ctl = new AbortController();
+  const items = qs.map(q => ({ q, status: 'wartet' }));
+  if (onProgress) onProgress(0, qs.length);
+  await runPool(items, POOL, ctl.signal, async it => {
+    try { await gradeOpen(it.q); }
+    catch (e) { firstErr = firstErr || e; if (e && FATAL.has(e.code)) ctl.abort(); }
+    done++; if (onProgress) onProgress(done, qs.length);
+  });
+  return firstErr;
+}
+async function submitQuiz(btn, status) {
+  const qz = state.quiz;
+  const open = qz.questions.filter(q => q.type === 'open' && !qz.results[q.id]);
+  btn.disabled = true;
+  status.className = 'msg';
+  const err = await gradeMany(open, (d, n) => { if (n) status.textContent = `Claude bewertet offene Antworten (${d}/${n}) …`; });
+  if (err) { status.className = 'msg err'; status.textContent = errText(err); }
+  qz.submitted = true; saveQuiz(); showQuizView();
+}
+function renderResult() {
+  const qz = state.quiz;
+  const rows = qz.questions.map(q => ({ q, r: resultOf(q) }));
+  const total = rows.reduce((s, x) => s + (x.r ? x.r.score : 0), 0);
+  const max = rows.reduce((s, x) => s + maxOf(x.q), 0);
+  const pct = max ? total / max * 100 : 0;
+  const ungraded = rows.filter(x => x.q.type === 'open' && !x.r);
+  const byKey = (key, labelFn) => {
+    const m = new Map();
+    rows.forEach(({ q, r }) => { const k = key(q); const e = m.get(k) || { label: labelFn(q), s: 0, m: 0, n: 0 }; e.s += r ? r.score : 0; e.m += maxOf(q); e.n++; m.set(k, e); });
+    return Array.from(m.values()).sort((a, b) => a.s / a.m - b.s / b.m);
+  };
+  const table = (title, data) => el('div', { class: 'tbl-wrap' }, el('table', { class: 'tbl' },
+    el('thead', {}, el('tr', {}, el('th', { text: title }), el('th', { text: 'Fragen' }), el('th', { text: 'Punkte' }), el('th', { text: 'Anteil' }))),
+    el('tbody', {}, ...data.map(d => el('tr', {}, el('td', { text: d.label }), el('td', { class: 'num', text: d.n }), el('td', { class: 'num', text: `${fmt(d.s)} / ${fmt(d.m)}` }),
+      el('td', {}, el('div', { class: 'bar', role: 'img', 'aria-label': Math.round(d.s / d.m * 100) + ' %' }, el('i', { style: `width:${Math.round(d.s / d.m * 100)}%` }))))))));
+  const wrong = rows.filter(x => !x.r || x.r.score < maxOf(x.q) - 1e-9);
+  const msg = el('p', { class: 'msg', role: 'status' });
+  const box = $('#quiz-result');
+  box.replaceChildren(
+    el('div', { class: 'panel-head' }, el('h2', { text: 'Auswertung' }), el('span', { class: 'mono muted', text: qz.title })),
+    el('div', { class: 'res-top' },
+      el('div', {}, el('div', { class: 'score-big', text: Math.round(pct) + ' %' }), el('p', { class: 'mono muted', text: `${fmt(total)} von ${fmt(max)} Punkten` })),
+      el('p', { class: 'hint', style: 'max-width:48ch', text: wrong.length ? `${wrong.length} ${wrong.length === 1 ? 'Frage' : 'Fragen'} nicht voll gelöst. Wiederhole sie gezielt oder speichere sie als Anki-Karten.` : 'Alles richtig. Teste dich in ein paar Tagen erneut, damit das Wissen hält.' })),
+    ungraded.length ? el('div', { class: 'notice' }, `${ungraded.length} offene ${ungraded.length === 1 ? 'Antwort wurde' : 'Antworten wurden'} nicht bewertet und zählen mit 0 Punkten. `,
+      el('button', { type: 'button', class: 'btn small', onclick: async e => { const b = e.currentTarget; b.disabled = true; const err = await gradeMany(ungraded.map(x => x.q)); renderResult(); if (err) { const m = $('#quiz-result p.msg'); if (m) { m.className = 'msg err'; m.textContent = errText(err); } } } }, 'Jetzt bewerten')) : null,
+    el('div', { class: 'actions' },
+      wrong.length ? el('button', { type: 'button', class: 'btn primary', onclick: () => { state.quiz = newQuizState(shuffle(wrong.map(x => JSON.parse(JSON.stringify(x.q)))), qz.settings, qz.title + ' (Wiederholung)'); saveQuiz(); showQuizView(); } }, 'Falsche wiederholen') : null,
+      el('button', { type: 'button', class: 'btn', onclick: () => { state.quiz = newQuizState(shuffle(qz.questions.map(q => JSON.parse(JSON.stringify(q)))), qz.settings, qz.title); saveQuiz(); showQuizView(); } }, 'Nochmal komplett'),
+      wrong.length ? el('button', { type: 'button', class: 'btn', onclick: () => exportWrongAsCards(wrong.map(x => x.q), msg) }, 'Falsche als Anki-Karten') : null,
+      el('button', { type: 'button', class: 'btn', onclick: () => saveQuizFile(msg) }, 'Quiz speichern'),
+      el('button', { type: 'button', class: 'btn ghost', onclick: () => { state.quiz = null; saveQuiz(); showQuizView(); } }, 'Neues Quiz')),
+    msg,
+    el('h3', { text: 'Nach Thema' }), table('Thema', byKey(q => q.topic, q => q.topic)),
+    el('h3', { text: 'Nach Fragetyp' }), table('Fragetyp', byKey(q => q.type, q => QTYPE_LABEL[q.type])),
+    el('h3', { text: 'Alle Fragen' }),
+    el('div', { class: 'review' }, ...rows.map(({ q }, i) => el('div', { class: 'review-item' },
+      el('div', { class: 'actions' }, el('span', { class: 'chip', text: 'Frage ' + (i + 1) }), el('span', { class: 'chip type', text: QTYPE_LABEL[q.type] }), el('span', { class: 'topic', text: q.topic + (q.slide ? ' · Folie ' + q.slide : '') })),
+      el('p', { style: 'font-weight:600', text: q.type === 'tf' ? q.statement : q.question }),
+      q.type === 'single' || q.type === 'multi' ? reviewOptions(q) : q.type === 'open' ? el('p', { class: 'hint', text: 'Deine Antwort: ' + (String(qz.answers[q.id] || '').trim() || '(keine)') }) : el('p', { class: 'hint', text: 'Deine Antwort: ' + (qz.answers[q.id] === true ? 'Wahr' : qz.answers[q.id] === false ? 'Falsch' : '(keine)') }),
+      feedbackBlock(q)))));
+}
+function reviewOptions(q) {
+  const a = state.quiz.answers[q.id];
+  const sel = new Set(q.type === 'multi' ? (Array.isArray(a) ? a : []) : a != null ? [a] : []);
+  return el('ul', { class: 'rub' }, ...q.options.map((o, i) => el('li', {},
+    el('span', { class: 'pts', text: (sel.has(i) ? '☒ ' : '☐ ') + String.fromCharCode(65 + i) }),
+    el('span', { class: o.correct ? 'verdict ok' : '', text: o.text }),
+    o.why ? el('span', { class: 'cm', text: o.why }) : null)));
+}
+function questionToCard(q) {
+  const e = escapeHtml;
+  let front, back;
+  if (q.type === 'tf') { front = `Wahr oder falsch? „${e(q.statement)}“`; back = `<ul><li><b>${q.answer ? 'Wahr' : 'Falsch'}</b></li>${q.explanation ? `<li>${e(q.explanation)}</li>` : ''}</ul>`; }
+  else if (q.type === 'open') { front = e(q.question); back = '<ul>' + q.rubric.map(r => `<li>${e(r.point)}</li>`).join('') + '</ul>'; }
+  else {
+    front = `${e(q.question)}<ol type="A">${q.options.map(o => `<li>${e(o.text)}</li>`).join('')}</ol>`;
+    back = `<ul><li><b>Richtig: ${correctIdx(q).map(i => String.fromCharCode(65 + i)).join(', ')}</b></li>${q.options.map((o, i) => o.why ? `<li>${String.fromCharCode(65 + i)}: ${e(o.why)}</li>` : '').join('')}</ul>`;
+  }
+  const f = state.files.find(x => x.name === q.fileName);
+  return { id: newId('k'), guid: newGuid(), type: 'basic', front, back, fileId: f ? f.id : null, fileName: q.fileName || '', slide: q.slide, topic: q.topic };
+}
+async function exportWrongAsCards(qs, msg) {
+  const course = $('#course').value.trim().replace(/::/g, ':');
+  const name = (course ? course + '::' : '') + 'Quiz-Fehler ' + fileSafe(state.quiz.title).replace(/::/g, ':');
+  await exportDeck(qs.map(questionToCard), name, false, msg, 'Quiz-Fehler');
+}
+async function saveQuizFile(msg) {
+  msg.className = 'msg';
+  try {
+    const qz = state.quiz;
+    const data = JSON.stringify({ format: 'lernstudio-quiz', version: 1, title: qz.title, created: qz.created, settings: qz.settings, questions: qz.questions }, null, 1);
+    await saveFile('Quiz ' + fileSafe(qz.title) + '.json', data);
+    msg.className = 'msg ok'; msg.textContent = 'Quiz gespeichert. Über „Gespeichertes Quiz öffnen“ kannst du es später erneut machen.';
+  } catch (e) { msg.className = 'msg err'; msg.textContent = errText(e); }
+}
+async function loadQuizFile(file) {
+  const msg = $('#gen-quiz-msg');
+  try {
+    const d = JSON.parse(await file.text());
+    if (!d || d.format !== 'lernstudio-quiz' || !Array.isArray(d.questions) || !d.questions.length) throw new Error();
+    const ok = d.questions.every(q => q && QTYPE_LABEL[q.type] && (q.type === 'tf' ? typeof q.answer === 'boolean' : q.type === 'open' ? Array.isArray(q.rubric) : Array.isArray(q.options)));
+    if (!ok) throw new Error();
+    const s = Object.assign({ scoring: 'all', mode: 'lern', tier: 'default', k: 5 }, d.settings || {}, { mode: $('#q-mode').value, scoring: $('#q-scoring').value });
+    state.quiz = newQuizState(shuffle(d.questions), s, String(d.title || 'Quiz'));
+    saveQuiz(); showQuizView();
+  } catch { msg.textContent = 'Diese Datei ist kein gespeichertes Lernstudio-Quiz.'; }
+}
+
+/* ---------- Tabs ---------- */
+function showTab(name) {
+  const isQuiz = name === 'quiz';
+  $('#tab-karten').setAttribute('aria-selected', String(!isQuiz));
+  $('#tab-quiz').setAttribute('aria-selected', String(isQuiz));
+  $('#view-karten').hidden = isQuiz;
+  $('#view-quiz').hidden = !isQuiz;
+  store.set('tab', name);
+  try { history.replaceState(null, '', '#' + name); } catch {}
+}
+
+/* ---------- Init ---------- */
+function restoreSettings() {
+  const meta = store.get('meta', {});
+  $('#course').value = meta.course || '';
+  $('#lecture').value = meta.lecture || '';
+  const co = store.get('cardOpts', null);
+  if (co) {
+    const d = $(`input[name=density][value="${co.density}"]`); if (d) d.checked = true;
+    $('#opt-reverse').checked = co.reverse !== false;
+    $('#opt-cloze').checked = co.cloze !== false;
+    if (co.lang) $('#opt-lang').value = co.lang;
+    if (co.tier) $('#opt-tier').value = co.tier;
+    $('#opt-coverage').checked = co.coverage !== false;
+    $('#card-req').value = co.req || '';
+  }
+  const qo = store.get('quizOpts', null);
+  if (qo) {
+    $$('input[name=qtype]').forEach(i => { i.checked = (qo.types || []).includes(i.value); });
+    $('#q-count').value = qo.count || 15;
+    if (qo.level) $('#q-level').value = qo.level;
+    if (qo.k) $('#q-k').value = String(qo.k);
+    if (qo.scoring) $('#q-scoring').value = qo.scoring;
+    if (qo.mode) $('#q-mode').value = qo.mode;
+    if (qo.tier) $('#q-tier').value = qo.tier;
+    $('#quiz-req').value = qo.req || '';
+  }
+  const dn = store.get('deckName', '');
+  if (dn) { $('#deck-name').value = dn; $('#deck-name').dataset.touched = '1'; } else syncDeckName();
+}
+function bind() {
+  $('#key-save').addEventListener('click', saveKey);
+  $('#api-key').addEventListener('keydown', e => { if (e.key === 'Enter') saveKey(); });
+  $('#key-change').addEventListener('click', () => { $('#key-ready').hidden = true; focusKey(); });
+  $('#key-forget').addEventListener('click', e => armConfirm(e.currentTarget, 'Wirklich entfernen?', () => { forgetKey(); paintKey(); }));
+  $('#tab-karten').addEventListener('click', () => showTab('karten'));
+  $('#tab-quiz').addEventListener('click', () => showTab('quiz'));
+  $('.tabs').addEventListener('keydown', e => { if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { const q = $('#tab-karten').getAttribute('aria-selected') === 'true'; showTab(q ? 'quiz' : 'karten'); $(q ? '#tab-quiz' : '#tab-karten').focus(); } });
+  const drop = $('#drop');
+  $('#file-input').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+  $('#paste-add').addEventListener('click', addPasted);
+  $('#mat-clear').addEventListener('click', e => armConfirm(e.currentTarget, 'Wirklich leeren?', () => { state.files = []; state.units = []; pdfDocs.clear(); resetMaterialCaches(); saveMaterial(); renderFiles(); updateImageOptions(); renderDeck(); }));
+  ['course', 'lecture'].forEach(id => $('#' + id).addEventListener('input', () => { saveMeta(); syncDeckName(); }));
+  $('#deck-name').addEventListener('input', e => { e.target.dataset.touched = '1'; store.set('deckName', e.target.value); });
+  $('#gen-cards').addEventListener('click', e => {
+    if (state.cards.length) armConfirm(e.currentTarget, 'Aktuelles Deck ersetzen?', generateCards); else generateCards();
+  });
+  $('#stop-cards').addEventListener('click', () => cardCtl && cardCtl.abort());
+  $('#run-coverage').addEventListener('click', () => runCoverage(false));
+  $('#card-search').addEventListener('input', e => { view.search = e.target.value.trim(); renderCardList(); });
+  $('#add-card').addEventListener('click', addCard);
+  $('#drop-dupes').addEventListener('click', () => { state.cards = state.cards.filter(c => !c.dupe); saveCards(); renderDeck(); });
+  $('#clear-deck').addEventListener('click', e => armConfirm(e.currentTarget, 'Deck wirklich verwerfen?', () => { state.cards = []; cardJobs = []; paintCardProgress(); saveCards(); renderDeck(); }));
+  $('#export-apkg').addEventListener('click', async e => {
+    const b = e.currentTarget;
+    const cards = state.cards.filter(c => !c.draft);
+    if (!cards.length) return;
+    b.disabled = true;
+    await exportDeck(cards, $('#deck-name').value.trim() || defaultDeckName(), $('#opt-slideimg').checked, $('#export-msg'));
+    b.disabled = false;
+  });
+  ['input', 'change'].forEach(t => {
+    $('#view-karten').addEventListener(t, e => { if (e.target.closest('#card-list, #deck-name, #card-search')) return; saveCardSettings(); });
+    $('#quiz-setup').addEventListener(t, e => { if (e.target.id !== 'quiz-load') saveQuizSettings(); });
+  });
+  $('#gen-quiz').addEventListener('click', generateQuiz);
+  $('#stop-quiz').addEventListener('click', () => quizCtl && quizCtl.abort());
+  $('#start-quiz').addEventListener('click', startQuiz);
+  $('#quiz-load').addEventListener('change', e => { if (e.target.files[0]) loadQuizFile(e.target.files[0]); e.target.value = ''; });
+}
+function init() {
+  restoreSettings();
+  bind();
+  renderFiles();
+  renderDeck();
+  const hash = (location.hash || '').replace('#', '');
+  showTab(hash === 'quiz' || hash === 'karten' ? hash : store.get('tab', 'karten'));
+  showQuizView();
+  updateImageOptions();
+  paintKey();
+  idle(() => loadSdk().catch(() => {}));
+  // Load the PDF reader while the page sits idle, so the first upload is read right away.
+  idle(() => loadScript(CDN.pdfWorker).catch(() => {}));
+  if (state.cards.length) prefetchExportLib();
+}
+window.lernstudio = { state, addFiles, unitText, buildApkg, packageApkg, makeChunks, normalizeCards, normalizeQuestions, cardPrompt, quizPrompt, autoScore };
+init();
+})();
+</script>
+</body>
+</html>
