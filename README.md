@@ -10,6 +10,7 @@ Aus Vorlesungsfolien werden Anki-Karteikarten und Übungsquizze.
 - **Quiz:** Wahr/Falsch, Single Choice, Multiple Choice und offene Fragen, mit Begründung zu jeder Antwortoption. Offene Antworten bewertet Claude nach einem Punkteraster. Falsch beantwortete Fragen lassen sich wiederholen oder als Anki-Karten speichern.
 - **Altklausuren:** Pro Fach Altklausuren hochladen (PDF, auch gescannt, Fotos, Word, Text). Claude erkennt das Prüfungsformat und meldet Klausuren, die zu einem anderen Fach gehören. Quizze und Probeklausuren (mit Zeitlimit und Punktabzug wie im Original) folgen dann diesem Stil.
 - **Formel-Modus:** jede Formel als eigene Karte plus Rechenbeispiel.
+- **Fortsetzen:** Claude arbeitet nur, solange die Seite offen ist. Wird sie mitten in einem Lauf geschlossen, bleibt alles Fertige gespeichert, und „Fortsetzen“ erstellt beim nächsten Öffnen nur den Rest.
 
 Mehr: [Bisherige Schritte](SCHRITTE.md) · [Roadmap](ROADMAP.md)
 

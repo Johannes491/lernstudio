@@ -6,7 +6,8 @@
 | Praxistest mit 2–3 echten Vorlesungen, Regeln nach Feedback nachschärfen | offen (braucht echte Durchläufe) |
 | Quiz und Probeklausur im Stil der Altklausuren (auch gescannt oder als Foto, Zeitlimit, Punktabzug), ein Klausurstil pro Fach | erledigt |
 | Formel-Modus: jede Formel als Karte plus Rechenbeispiel | erledigt |
-| Hinweis auf der Website auf die claude.ai-Version | erledigt; der Link funktioniert erst, wenn die claude.ai-Version öffentlich geteilt ist |
+| Hinweis auf der Website auf die claude.ai-Version | erledigt |
+| Läufe nach dem Schließen fortsetzen statt neu starten | erledigt |
 
 ## Phase 2: Mehr aus den eigenen Decks machen
 - Eigenes Deck als Stilvorlage hochladen

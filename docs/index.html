@@ -81,6 +81,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 .tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
 
 .notice{border:1px solid var(--warn);background:var(--warn-soft);color:var(--ink);border-radius:var(--r);padding:12px 16px;margin-bottom:16px}
+.resume{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:12px 0 0}
+.resume span{flex:1 1 260px}
 
 .layout{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:20px;align-items:start}
 @media (max-width:900px){.layout{grid-template-columns:minmax(0,1fr)}}
@@ -361,6 +363,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
             <button type="button" id="stop-cards" class="btn" hidden>Stopp</button>
             <span id="gen-cards-msg" class="hint" role="status"></span>
           </div>
+          <div id="card-resume" class="notice resume" hidden></div>
           <ol id="card-progress" class="progress" aria-live="polite"></ol>
           <details class="method">
             <summary>Wie die Karten entstehen</summary>
@@ -479,6 +482,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
             <label class="btn small ghost" style="position:relative;overflow:hidden">Gespeichertes Quiz öffnen<input type="file" id="quiz-load" accept=".json,application/json" style="position:absolute;inset:0;opacity:0;cursor:pointer"></label>
             <span id="gen-quiz-msg" class="hint" role="status"></span>
           </div>
+          <div id="quiz-resume" class="notice resume" hidden></div>
           <ol id="quiz-progress" class="progress" aria-live="polite"></ol>
           <details class="method">
             <summary>Wie die Fragen entstehen</summary>
@@ -1053,6 +1057,15 @@ function chunkLabel(c) {
   const plural = { Folie: 'Folien', Seite: 'Seiten', Abschnitt: 'Abschnitte' }[a.kind] || 'Teile';
   return `${c.fileName} · ${a === b ? a.label : `${plural} ${a.num}–${b.num}`}`;
 }
+// Runs save their chunks as slide references, so a resumed run finds the same slides again (also after the file was loaded anew).
+// File ids are only numbers in load order, so a reference matches by id and name, and by name alone for a file loaded anew.
+const unitRef = u => [u.fileId, u.fileName, u.num];
+function chunkFromRefs(refs) {
+  const units = refs.map(([id, name, num]) => state.units.find(u => u.fileId === id && u.fileName === name && u.num === num) || state.units.find(u => u.fileName === name && u.num === num));
+  if (!units.length || units.some(u => !u)) return null;
+  return { fileId: units[0].fileId, fileName: units[0].fileName, units, chars: units.reduce((a, u) => a + unitText(u).length + 60, 0) };
+}
+const MATERIAL_GONE = 'Das Material dieses Laufs fehlt. Lade die Dateien links erneut und klicke dann auf „Fortsetzen“.';
 function materialBlock(units) {
   return units.map(u => `=== ${u.fileName} · ${u.label} ===\n${unitText(u) || '(kein extrahierbarer Text, siehe Folienbild)'}`).join('\n\n');
 }
@@ -1292,6 +1305,36 @@ function sortCards() {
 /* ---------- Karten: Ablauf ---------- */
 let cardCtl = null;
 let cardJobs = [];
+// Claude only works while the page is open. Each run's plan and progress are saved after every finished section,
+// so a run cut off by closing the tool continues where it stopped.
+let cardRun = store.get('cardRun', null);
+function saveCardRun() {
+  if (!cardRun) { store.del('cardRun'); return; }
+  const live = new Map(cardJobs.map(j => [j.key, j]));
+  for (const j of cardRun.jobs.concat(cardRun.cov || [])) {
+    const x = live.get(j.key);
+    if (x) { j.done = x.status === 'fertig'; j.doneText = x.done || ''; }
+  }
+  store.set('cardRun', cardRun);
+}
+function cardRunLeft() {
+  if (!cardRun) return null;
+  const gen = cardRun.jobs.filter(j => !j.done).length;
+  const cov = cardRun.cov ? cardRun.cov.filter(j => !j.done).length : cardRun.opts.coverage ? 1 : 0;
+  return gen || cov ? { gen, cov } : null;
+}
+function renderCardResume() {
+  const box = $('#card-resume');
+  if (cardRun && !cardRunLeft()) { cardRun = null; saveCardRun(); }
+  box.hidden = !cardRun || !$('#stop-cards').hidden;
+  if (box.hidden) return;
+  const left = cardRunLeft(), total = cardRun.jobs.length;
+  const what = left.gen ? `${total - left.gen} von ${total} Abschnitten fertig` : 'alle Abschnitte fertig, die Abdeckungsprüfung fehlt noch';
+  fill(box,
+    el('span', { text: `Unterbrochener Lauf: ${what}. ${state.cards.length} Karten sind gesichert.` + (cardRun.opts.images && !pdfDocs.size ? ' Folienbilder gehen nur mit, wenn du die PDF vorher links erneut lädst.' : '') }),
+    el('button', { type: 'button', class: 'btn small primary', onclick: resumeCards }, 'Fortsetzen'),
+    el('button', { type: 'button', class: 'btn small ghost', onclick: () => { cardRun = null; saveCardRun(); renderCardResume(); } }, 'Nicht fortsetzen'));
+}
 function readCardOpts() {
   return {
     density: ($('input[name=density]:checked') || {}).value || 'vollstaendig',
@@ -1350,7 +1393,7 @@ async function runCardJob(job, total, o) {
     if (e && e.code === 'cancelled') job.status = 'abgebrochen';
     else { job.status = 'fehler'; job.err = errText(e) + (job.n && e.code !== 'refused' ? ` (${job.n} Karten sind schon da)` : ''); if (e && FATAL.has(e.code)) { cardCtl.fatal = job.err; cardCtl.abort(); } }
   }
-  sortCards(); saveCards(); renderDeck(true); paintCardProgress();
+  sortCards(); saveCards(); saveCardRun(); renderDeck(true); paintCardProgress();
 }
 function paintCardProgress() { renderProgress('#card-progress', cardJobs, retryCardJob); }
 async function retryCardJob(job) {
@@ -1362,6 +1405,7 @@ async function retryCardJob(job) {
 }
 function setCardBusy(b) {
   $('#gen-cards').disabled = b; $('#stop-cards').hidden = !b; $('#run-coverage').disabled = b; $('#export-apkg').disabled = b;
+  renderCardResume();
 }
 function prefetchExportLib() { idle(() => loadScript(CDN.sql).catch(() => {})); }
 async function generateCards() {
@@ -1375,32 +1419,66 @@ async function generateCards() {
   const maxUnits = o.images ? Math.max(1, Math.min(per, caps.imageMax)) : per;
   const chunks = makeChunks(usableUnits(o.images), maxChars, maxUnits);
   if (!chunks.length) { msg.textContent = 'Im Material wurde kein Text gefunden. Aktiviere „Folienbilder mitsenden“ für gescannte PDFs.'; return; }
-  const t0 = Date.now(), cost0 = usage.cost;
+  const t0 = Date.now();
   state.cards = []; saveCards(); renderDeck();
-  cardCtl = new AbortController();
   cardJobs = chunks.map((chunk, idx) => ({ kind: 'gen', key: 'g' + idx + '-' + t0, chunk, idx, label: chunkLabel(chunk), status: 'wartet', opts: o }));
+  cardRun = { opts: o, jobs: cardJobs.map(j => ({ key: j.key, idx: j.idx, label: j.label, refs: j.chunk.units.map(unitRef), done: false })), cov: null };
+  saveCardRun();
+  await continueCards();
+}
+async function resumeCards() {
+  const msg = $('#gen-cards-msg');
+  msg.textContent = '';
+  if (!cardRun) return;
+  if (!hasKey()) { msg.textContent = errText({ code: 'no_key' }); focusKey(); return; }
+  const o = cardRun.opts;
+  cardJobs = cardRun.jobs.map(j => ({ kind: 'gen', key: j.key, chunk: chunkFromRefs(j.refs), idx: j.idx, label: j.label, status: j.done ? 'fertig' : 'wartet', done: j.doneText || '', opts: o }));
+  if (cardJobs.some(j => !j.chunk && j.status !== 'fertig')) { cardJobs = []; msg.textContent = MATERIAL_GONE; return; }
+  // A file loaded anew gets a new id; move the finished cards over, so the coverage check and slide images still find them.
+  const moved = new Map();
+  cardRun.jobs.forEach(j => j.refs.forEach(([id, name]) => {
+    if (moved.has(id) || state.units.some(u => u.fileId === id && u.fileName === name)) return;
+    const u = state.units.find(x => x.fileName === name);
+    if (u) moved.set(id, u.fileId);
+  }));
+  if (moved.size) { state.cards.forEach(c => { if (moved.has(c.fileId)) c.fileId = moved.get(c.fileId); }); saveCards(); renderDeck(); }
+  await continueCards();
+}
+async function continueCards() {
+  const o = cardRun.opts, msg = $('#gen-cards-msg');
+  const started = Date.now(), cost0 = usage.cost;
+  const todo = cardJobs.filter(j => j.status !== 'fertig');
+  cardCtl = new AbortController();
   paintCardProgress(); setCardBusy(true); prefetchExportLib();
   // Render slide images in chunk order in the background, so the first chunk's images are ready first.
-  if (o.images) (async () => { for (const c of chunks) for (const u of c.units) await claudeSlide(u.fileId, u.num); })();
-  await runPool(cardJobs, POOL, cardCtl.signal, job => runCardJob(job, chunks.length, o));
+  if (o.images) (async () => { for (const j of todo) for (const u of j.chunk.units) await claudeSlide(u.fileId, u.num); })();
+  await runPool(todo, POOL, cardCtl.signal, job => runCardJob(job, cardRun.jobs.length, o));
   paintCardProgress();
   const failed = cardJobs.filter(j => j.status !== 'fertig').length;
   if (!cardCtl.signal.aborted && !failed && o.coverage && state.cards.length) await runCoverage(true);
+  else if (!cardCtl.signal.aborted && !failed && !state.cards.length) cardRun.cov = [];
   setCardBusy(false);
-  const secs = Math.round((Date.now() - t0) / 1000);
+  const secs = Math.round((Date.now() - started) / 1000);
   msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${state.cards.length} Karten in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}${costNote(cost0)}.`;
 }
 async function runCoverage(fromGenerate) {
   if (!state.cards.length || !state.units.length) return;
   if (!hasKey()) { $('#gen-cards-msg').textContent = errText({ code: 'no_key' }); focusKey(); return; }
-  const o = Object.assign(readCardOpts(), { images: false });
+  const run = fromGenerate ? cardRun : null;
+  const o = Object.assign({}, run ? run.opts : readCardOpts(), { images: false });
   if (!fromGenerate) { cardCtl = new AbortController(); setCardBusy(true); }
   cardJobs = cardJobs.filter(j => j.kind !== 'cov');
-  // Smaller groups than before, so several checks run in parallel instead of one long one.
-  const groups = makeChunks(usableUnits(false), 16000, 30);
-  const jobs = groups.map((g, i) => ({ kind: 'cov', key: 'c' + i + '-' + Date.now(), group: g, label: 'Abdeckung prüfen · ' + chunkLabel(g), status: 'wartet' }));
+  // A resumed run checks only the groups that were not finished before.
+  let jobs = run && run.cov && run.cov.length ? run.cov.map(j => ({ kind: 'cov', key: j.key, group: chunkFromRefs(j.refs), label: j.label, status: j.done ? 'fertig' : 'wartet', done: j.doneText || '' })) : null;
+  if (!jobs || jobs.some(j => !j.group && j.status !== 'fertig')) {
+    // Smaller groups than before, so several checks run in parallel instead of one long one.
+    const groups = makeChunks(usableUnits(false), 16000, 30);
+    const t = Date.now();
+    jobs = groups.map((g, i) => ({ kind: 'cov', key: 'c' + i + '-' + t, group: g, label: 'Abdeckung prüfen · ' + chunkLabel(g), status: 'wartet' }));
+    if (run) { run.cov = jobs.map(j => ({ key: j.key, label: j.label, refs: j.group.units.map(unitRef), done: false })); saveCardRun(); }
+  }
   cardJobs.push(...jobs); paintCardProgress();
-  await runPool(jobs, POOL, cardCtl.signal, async job => {
+  await runPool(jobs.filter(j => j.status !== 'fertig'), POOL, cardCtl.signal, async job => {
     job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0; paintCardProgress();
     const g = job.group;
     const lo = g.units[0].num, hi = g.units[g.units.length - 1].num;
@@ -1429,7 +1507,7 @@ async function runCoverage(fromGenerate) {
       if (e && e.code === 'cancelled') job.status = 'abgebrochen';
       else { job.status = 'fehler'; job.err = errText(e); if (e && FATAL.has(e.code)) { cardCtl.fatal = job.err; cardCtl.abort(); } }
     }
-    sortCards(); saveCards(); renderDeck(true); paintCardProgress();
+    sortCards(); saveCards(); saveCardRun(); renderDeck(true); paintCardProgress();
   });
   if (!fromGenerate) {
     setCardBusy(false);
@@ -1824,6 +1902,31 @@ AUSGABE: Antworte ausschließlich mit JSON in genau dieser Form, ein Eintrag je 
 
 /* ---------- Quiz: Erzeugung ---------- */
 let quizCtl = null, quizJobs = [], pendingQuestions = [], quizCost0 = 0;
+// Like card runs, a quiz run is saved after every finished part and kept until the quiz starts.
+let quizRun = store.get('quizRun', null);
+function saveQuizRun() {
+  if (!quizRun) { store.del('quizRun'); return; }
+  // Only jobs built for this run carry its progress; before a resume they are still the saved ones.
+  if (quizJobs.length && quizRun.jobs.some(j => j.key === quizJobs[0].key)) {
+    const live = new Map(quizJobs.map(j => [j.key, j]));
+    quizRun.jobs.forEach(j => { const x = live.get(j.key); if (x) { j.done = x.status === 'fertig'; j.doneText = x.done || ''; } });
+    quizRun.questions = pendingQuestions;
+  }
+  store.set('quizRun', quizRun);
+}
+function renderQuizResume() {
+  const box = $('#quiz-resume');
+  const live = quizRun && quizJobs.length && quizRun.jobs.some(j => j.key === quizJobs[0].key);
+  const left = quizRun ? quizRun.jobs.filter(j => !j.done).length : 0;
+  box.hidden = !quizRun || !$('#stop-quiz').hidden || (live && !left);
+  if (box.hidden) return;
+  const n = (quizRun.questions || []).length, total = quizRun.jobs.length;
+  const name = quizRun.opts.title || 'Quiz';
+  fill(box,
+    el('span', { text: left ? `Unterbrochen: ${name}, ${total - left} von ${total} Teilen fertig, ${n} Fragen sind gesichert.` : `${name} mit ${n} Fragen ist fertig erstellt und wartet.` }),
+    el('button', { type: 'button', class: 'btn small primary', onclick: resumeQuiz }, left ? 'Fortsetzen' : 'Starten'),
+    el('button', { type: 'button', class: 'btn small ghost', onclick: () => { quizRun = null; saveQuizRun(); renderQuizResume(); } }, 'Verwerfen'));
+}
 function largestRemainder(total, weights) {
   const sum = weights.reduce((a, b) => a + b, 0) || 1;
   const raw = weights.map(w => total * w / sum);
@@ -1871,6 +1974,7 @@ function paintQuizProgress() { renderProgress('#quiz-progress', quizJobs, retryQ
 function setQuizBusy(b) {
   $('#gen-quiz').disabled = b; $('#stop-quiz').hidden = !b; if (b) $('#start-quiz').hidden = true;
   const mb = document.getElementById('mock-exam'); if (mb) mb.disabled = b;
+  renderQuizResume();
 }
 let quizPaintTimer = 0;
 function scheduleQuizPaint() { if (!quizPaintTimer) quizPaintTimer = setTimeout(() => { quizPaintTimer = 0; paintQuizProgress(); }, 300); }
@@ -1896,7 +2000,7 @@ async function runQuizJob(job, o) {
     if (e && e.code === 'cancelled') job.status = 'abgebrochen';
     else { job.status = 'fehler'; job.err = errText(e) + (job.n && e.code !== 'refused' ? ` (${job.n} Fragen sind schon da)` : ''); if (e && FATAL.has(e.code)) { quizCtl.fatal = job.err; quizCtl.abort(); } }
   }
-  paintQuizProgress();
+  saveQuizRun(); paintQuizProgress();
 }
 async function retryQuizJob(job) {
   if (!quizCtl || quizCtl.signal.aborted) quizCtl = new AbortController();
@@ -1941,10 +2045,26 @@ async function generateQuiz(override) {
     const tfTrue = plan.tf ? (Math.random() < 0.5 ? Math.ceil(plan.tf / 2) : Math.floor(plan.tf / 2)) : 0;
     jobs.push({ key: 'z' + i + '-' + Date.now(), chunk, plan, tfTrue, opts: o, label: chunkLabel(chunk) + ' · ' + quotas[i] + ' Fragen', status: 'wartet' });
   });
-  quizCtl = new AbortController(); quizCost0 = usage.cost;
   quizJobs = jobs; pendingQuestions = [];
+  quizRun = { opts: o, jobs: jobs.map(j => ({ key: j.key, label: j.label, refs: j.chunk.units.map(unitRef), plan: j.plan, tfTrue: j.tfTrue, done: false })), questions: [] };
+  saveQuizRun();
+  await continueQuiz();
+}
+async function resumeQuiz() {
+  const msg = $('#gen-quiz-msg'); msg.textContent = '';
+  if (!quizRun) return;
+  if (!hasKey()) { msg.textContent = errText({ code: 'no_key' }); focusKey(); return; }
+  const o = quizRun.opts;
+  quizJobs = quizRun.jobs.map(j => ({ key: j.key, chunk: chunkFromRefs(j.refs), plan: j.plan, tfTrue: j.tfTrue, opts: o, label: j.label, status: j.done ? 'fertig' : 'wartet', done: j.doneText || '' }));
+  if (quizJobs.some(j => !j.chunk && j.status !== 'fertig')) { quizJobs = []; msg.textContent = MATERIAL_GONE; return; }
+  pendingQuestions = quizRun.questions || [];
+  await continueQuiz();
+}
+async function continueQuiz() {
+  const o = quizRun.opts;
+  quizCtl = new AbortController(); quizCost0 = usage.cost;
   setQuizBusy(true); paintQuizProgress();
-  await runPool(quizJobs, POOL, quizCtl.signal, job => runQuizJob(job, o));
+  await runPool(quizJobs.filter(j => j.status !== 'fertig'), POOL, quizCtl.signal, job => runQuizJob(job, o));
   setQuizBusy(false); paintQuizProgress();
   afterQuizGen();
   if (pendingQuestions.length && quizJobs.every(j => j.status === 'fertig')) startQuiz();
@@ -1953,6 +2073,7 @@ function startQuiz() {
   const o = quizJobs.length ? quizJobs[0].opts : readQuizOpts();
   const title = o.title || $('#lecture').value.trim() || $('#course').value.trim() || 'Quiz';
   state.quiz = newQuizState(shuffle(pendingQuestions.map(q => { const c = Object.assign({}, q); delete c.job; return c; })), o, title, o.timeLimitMin);
+  quizRun = null; saveQuizRun();
   saveQuiz(); showQuizView();
 }
 function newQuizState(questions, o, title, timeLimitMin) {
@@ -2533,7 +2654,7 @@ function bind() {
   ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
   drop.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
   $('#paste-add').addEventListener('click', addPasted);
-  $('#mat-clear').addEventListener('click', e => armConfirm(e.currentTarget, 'Wirklich leeren?', () => { state.files = []; state.units = []; pdfDocs.clear(); resetMaterialCaches(); saveMaterial(); renderFiles(); updateImageOptions(); renderDeck(); }));
+  $('#mat-clear').addEventListener('click', e => armConfirm(e.currentTarget, 'Wirklich leeren?', () => { state.files = []; state.units = []; pdfDocs.clear(); resetMaterialCaches(); saveMaterial(); renderFiles(); updateImageOptions(); renderDeck(); cardRun = null; quizRun = null; saveCardRun(); saveQuizRun(); renderCardResume(); renderQuizResume(); }));
   ['course', 'lecture'].forEach(id => $('#' + id).addEventListener('input', () => { saveMeta(); syncDeckName(); }));
   $('#deck-name').addEventListener('input', e => { e.target.dataset.touched = '1'; store.set('deckName', e.target.value); });
   $('#gen-cards').addEventListener('click', e => {
@@ -2544,7 +2665,7 @@ function bind() {
   $('#card-search').addEventListener('input', e => { view.search = e.target.value.trim(); renderCardList(); });
   $('#add-card').addEventListener('click', addCard);
   $('#drop-dupes').addEventListener('click', () => { state.cards = state.cards.filter(c => !c.dupe); saveCards(); renderDeck(); });
-  $('#clear-deck').addEventListener('click', e => armConfirm(e.currentTarget, 'Deck wirklich verwerfen?', () => { state.cards = []; cardJobs = []; paintCardProgress(); saveCards(); renderDeck(); }));
+  $('#clear-deck').addEventListener('click', e => armConfirm(e.currentTarget, 'Deck wirklich verwerfen?', () => { state.cards = []; cardJobs = []; cardRun = null; saveCardRun(); paintCardProgress(); saveCards(); renderDeck(); renderCardResume(); }));
   $('#export-apkg').addEventListener('click', async e => {
     const b = e.currentTarget;
     const cards = state.cards.filter(c => !c.draft);
@@ -2569,6 +2690,10 @@ function bind() {
   $('#stop-quiz').addEventListener('click', () => quizCtl && quizCtl.abort());
   $('#start-quiz').addEventListener('click', startQuiz);
   $('#quiz-load').addEventListener('change', e => { if (e.target.files[0]) loadQuizFile(e.target.files[0]); e.target.value = ''; });
+  // Closing the tool ends every running call. Save what streamed in so far; the run continues from there via „Fortsetzen“.
+  const saveProgress = () => { saveCards(); saveCardRun(); saveQuizRun(); };
+  window.addEventListener('pagehide', saveProgress);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) saveProgress(); });
 }
 function init() {
   restoreSettings();
@@ -2576,6 +2701,8 @@ function init() {
   renderFiles();
   renderDeck();
   renderExamPanel();
+  renderCardResume();
+  renderQuizResume();
   const hash = (location.hash || '').replace('#', '');
   showTab(hash === 'quiz' || hash === 'karten' ? hash : store.get('tab', 'karten'));
   showQuizView();

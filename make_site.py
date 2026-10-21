@@ -360,14 +360,14 @@ body = replace(body, """  const img = $('#opt-images');
   img.disabled = !anyPdf;
   if (img.disabled) img.checked = false;
   $('#opt-images-hint').textContent = anyPdf ? 'Liest auch Diagramme, Abbildungen und gescannte Folien. Langsamer und etwas teurer.' : 'Nur für PDFs, die in dieser Sitzung geladen wurden.';""")
-body = replace(body, "  if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }", "  if (!hasKey()) { msg.textContent = errText({ code: 'no_key' }); focusKey(); return; }", 3)
+body = replace(body, "  if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }", "  if (!hasKey()) { msg.textContent = errText({ code: 'no_key' }); focusKey(); return; }", 5)
 body = replace(body, "  if (!caps.sample) { $('#gen-cards-msg').textContent = errText({ code: 'unavailable' }); return; }", "  if (!hasKey()) { $('#gen-cards-msg').textContent = errText({ code: 'no_key' }); focusKey(); return; }")
 
 # cost after each run
-body = replace(body, "  const t0 = Date.now();\n  state.cards = []; saveCards(); renderDeck();", "  const t0 = Date.now(), cost0 = usage.cost;\n  state.cards = []; saveCards(); renderDeck();")
+body = replace(body, "  const started = Date.now();\n", "  const started = Date.now(), cost0 = usage.cost;\n")
 body = replace(body, "Karten in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}.`;", "Karten in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}${costNote(cost0)}.`;")
 body = replace(body, "let quizCtl = null, quizJobs = [], pendingQuestions = [];", "let quizCtl = null, quizJobs = [], pendingQuestions = [], quizCost0 = 0;")
-body = replace(body, "  quizCtl = new AbortController();\n  quizJobs = jobs;", "  quizCtl = new AbortController(); quizCost0 = usage.cost;\n  quizJobs = jobs;")
+body = replace(body, "  quizCtl = new AbortController();\n  setQuizBusy(true); paintQuizProgress();", "  quizCtl = new AbortController(); quizCost0 = usage.cost;\n  setQuizBusy(true); paintQuizProgress();")
 body = replace(body, "fehlgeschlagen.` : n ? 'Fertig.' : '';", "fehlgeschlagen.` : n ? `Fertig${costNote(quizCost0)}.` : '';")
 
 # downloads: a real .apkg instead of a .zip wrapper

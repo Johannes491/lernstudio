@@ -9,3 +9,4 @@
 7. **Optimierung:** bis zu 8 parallele Anfragen, kleinere Folienbilder für Claude, Bibliotheken laden bei Bedarf, als App installierbar.
 8. **Phase 1:** Altklausuren hochladen (auch gescannt oder als Foto), Klausurstil erkennen, Quiz und Probeklausur im Stil der Altklausuren mit Zeitlimit und Punktabzug, Formel-Modus für Karteikarten, Hinweis auf die claude.ai-Version.
 9. **Klausurstil pro Fach:** Jedes Fach hat ein eigenes Profil. Claude prüft, ob eine hochgeladene Klausur wirklich zum Fach passt, und lässt fremde Klausuren weg. Mehrere Fotos einer Klausur zählen als eine Klausur.
+10. **Fortsetzen nach Unterbrechung:** Karten-, Quiz- und Probeklausur-Läufe speichern nach jedem fertigen Abschnitt. Wird das Lernstudio geschlossen, bietet es beim nächsten Öffnen „Fortsetzen“ an und erstellt nur die fehlenden Abschnitte.
