@@ -358,7 +358,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
       <section id="view-quiz" role="tabpanel" aria-labelledby="tab-quiz" class="stack" hidden>
         <div class="panel" id="exam-panel">
           <div class="panel-head"><h2>Altklausuren</h2><span id="exam-status" class="hint"></span></div>
-          <p class="hint">Jedes Fach bekommt seinen eigenen Klausurstil. Wähle zuerst das Fach und lade dann dessen Altklausuren, Probeklausuren oder Beispielfragen hoch. Claude erkennt daraus das Prüfungsformat: Aufgabentypen, Formulierungen, Niveau, Punkte und Zeit. Quizze und Probeklausuren übernehmen diesen Stil, mit Inhalten aus deinem Vorlesungsmaterial.</p>
+          <p class="hint">Jedes Fach bekommt seinen eigenen Klausurstil. Wähle zuerst das Fach und lade dann dessen Altklausuren, Probeklausuren oder Beispielfragen hoch. Claude liest jede Klausur Seite für Seite, auch Grafiken, R-Outputs und ausgefüllte Antwortbögen, und erstellt daraus ihren Bauplan: Aufgaben, Themen, Formulierungen, Lösungen, Punkte und Zeit. Probeklausuren folgen diesem Bauplan mit neuen Aussagen und Zahlen. Quizze im Klausurstil nehmen die Inhalte aus deinem Vorlesungsmaterial.</p>
           <label><span class="lbl">Fach</span><input type="text" id="exam-subject" list="exam-subjects" placeholder="z. B. Diagnostik I" autocomplete="off"></label>
           <datalist id="exam-subjects"></datalist>
           <label class="drop" id="exam-drop">
@@ -384,6 +384,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
               <label><input type="checkbox" name="qtype" value="single" checked><span>Single Choice</span></label>
               <label><input type="checkbox" name="qtype" value="multi" checked><span>Multiple Choice</span></label>
               <label><input type="checkbox" name="qtype" value="open" checked><span>Offene Fragen</span></label>
+              <label><input type="checkbox" name="qtype" value="block"><span>Aussagenblöcke</span></label>
             </div>
           </fieldset>
           <div class="grid2">
@@ -557,7 +558,7 @@ async function initCaps() {
 // Speed: the platform runs a couple of calls at once and queues a few more, so 3 keeps every slot busy.
 const POOL = 3;
 // Speed: card writing is extraction, so little thinking is needed; checks and distractors get a bit more.
-const EFFORT = { cards: 'low', coverage: 'medium', quiz: 'medium', grade: 'low' };
+const EFFORT = { cards: 'low', coverage: 'medium', quiz: 'medium', grade: 'low', exam: 'high' };
 function callOpts({ tier, effort, signal, images }) {
   const opts = { modelTier: tier, cache: false };
   if (effort) opts.effort = effort;
@@ -908,7 +909,7 @@ async function drawSlide(fileId, num, width) {
   const doc = pdfDocs.get(fileId);
   return doc ? drawPage(doc, num, width) : null;
 }
-async function drawPage(doc, num, width) {
+async function drawPage(doc, num, width, quality = 0.72) {
   const page = await doc.getPage(num);
   const vp1 = page.getViewport({ scale: 1 });
   const vp = page.getViewport({ scale: Math.min(3, width / vp1.width) });
@@ -919,7 +920,7 @@ async function drawPage(doc, num, width) {
   // 'print' renders without requestAnimationFrame, so it keeps going while the tab is in the background
   await page.render({ canvasContext: ctx, viewport: vp, intent: 'print' }).promise;
   page.cleanup();
-  return new Promise(res => c.toBlob(res, 'image/jpeg', 0.72));
+  return new Promise(res => c.toBlob(res, 'image/jpeg', quality));
 }
 function updateImageOptions() {
   const anyPdf = state.files.some(f => pdfDocs.has(f.id));
@@ -1602,7 +1603,10 @@ async function exportDeck(cards, deckName, withImages, msgEl, extraTag) {
 }
 
 /* ---------- Quiz: Prompts ---------- */
-const QTYPE_LABEL = { tf: 'Wahr / Falsch', single: 'Single Choice', multi: 'Multiple Choice', open: 'Offene Frage' };
+const QTYPE_LABEL = { tf: 'Wahr / Falsch', single: 'Single Choice', multi: 'Multiple Choice', open: 'Offene Frage', block: 'Aussagenblock' };
+const QTYPES = Object.keys(QTYPE_LABEL);
+// Statement blocks are lettered a, b, c like in the exams; choice questions A, B, C.
+const letter = (q, i) => String.fromCharCode((q.type === 'block' ? 97 : 65) + i);
 function readQuizOpts() {
   return {
     types: $$('input[name=qtype]:checked').map(i => i.value),
@@ -1618,7 +1622,9 @@ function readQuizOpts() {
 }
 // Quiz options that follow a recognized exam style: its task types, their shares and its number of options.
 function styleOpts(st) {
-  return { examStyle: st, types: Object.keys(st.shares).filter(t => st.shares[t] > 0), typeWeights: st.shares, k: Math.max(3, Math.min(6, st.options || 5)) };
+  const types = QTYPES.filter(t => st.shares[t] > 0);
+  const sm = st.statements || {};
+  return { examStyle: st, types: types.length ? types : ['tf'], typeWeights: st.shares, k: Math.max(3, Math.min(6, st.options || 5)), blockMin: sm.min || 4, blockMax: sm.max || 5 };
 }
 function examStyleBlock(o) {
   const st = o.examStyle;
@@ -1629,7 +1635,7 @@ function examStyleBlock(o) {
 - Niveau: ${st.level || '–'}
 - Typische Formulierungen: ${st.phrasing.length ? st.phrasing.map(x => '„' + x + '“').join('; ') : '–'}
 - Besonderheiten: ${st.features.length ? st.features.join('; ') : '–'}
-${ex ? '- Beispielaufgaben aus den Altklausuren (nur als Stilvorlage):\n' + ex + '\n' : ''}- Enthalten die Altklausuren Aufgaben zu R-Outputs, Tabellen, Rechnungen oder Fallvignetten, baue solche Aufgaben ebenfalls ein und lege das Material dafür in "stimulus" (z. B. ein plausibler R-Output, eine Tabelle oder eine kurze Fallbeschreibung, passend zu den Inhalten der Vorlesung). Für dieses Material darfst du Beispielzahlen wählen; sie müssen in sich stimmig und nachrechenbar sein. Mehrere Wahr/Falsch-Aussagen dürfen sich auf denselben "stimulus" beziehen (dann in jeder Aussage wiederholen).
+${st.rules && st.rules.length ? '- Regeln der Klausur: ' + st.rules.join('; ') + '\n' : ''}${st.statements ? `- Aufgaben mit mehreren Aussagen: ${st.statements.min}–${st.statements.max} Aussagen je Aufgabe, davon ${st.correctPerQuestion || 'keine bis alle'} richtig\n` : ''}${ex ? '- Beispielaufgaben aus den Altklausuren (nur als Stilvorlage):\n' + ex + '\n' : ''}- Enthalten die Altklausuren Aufgaben zu R-Outputs, Tabellen, Rechnungen oder Fallvignetten, baue solche Aufgaben ebenfalls ein und lege das Material dafür in "stimulus" (z. B. ein plausibler R-Output, eine Tabelle oder eine kurze Fallbeschreibung, passend zu den Inhalten der Vorlesung). Für dieses Material darfst du Beispielzahlen wählen; sie müssen in sich stimmig und nachrechenbar sein. Mehrere Wahr/Falsch-Aussagen dürfen sich auf denselben "stimulus" beziehen (dann in jeder Aussage wiederholen).
 
 `;
 }
@@ -1640,6 +1646,7 @@ function planText(plan, tfTrue) {
   if (plan.single) parts.push(`${plan.single} × Single Choice`);
   if (plan.multi) parts.push(`${plan.multi} × Multiple Choice`);
   if (plan.open) parts.push(`${plan.open} × offene Frage`);
+  if (plan.block) parts.push(`${plan.block} × Aussagenblock`);
   return parts.join(', ');
 }
 function levelRule(level) {
@@ -1684,6 +1691,11 @@ OFFENE FRAGE ("open"):
 - "modelAnswer": vollständige Musterlösung in 2–6 Sätzen.
 - "rubric": 2–6 prüfbare Inhaltspunkte mit Punktzahl (meist 1 Punkt je Inhalt).
 
+AUSSAGENBLOCK ("block"):
+- Eine Aufgabe mit ${o.blockMin || 4} bis ${o.blockMax || 5} Aussagen (a, b, c …) zu einem gemeinsamen Thema oder einer gemeinsamen Aufgabenstellung (Fall, Zahlen oder R-Output in "stimulus"). Stamm z. B. „Im Folgenden finden Sie eine Reihe von Aussagen zu … Welche der Aussagen sind richtig?“
+- Jede Aussage ist für sich richtig oder falsch. Pro Aufgabe dürfen keine bis alle Aussagen richtig sein; variiere die Anzahl zwischen den Aufgaben.
+- Falsche Aussagen enthalten typische Verwechslungen, falsche Zahlen oder falsche Schlussfolgerungen. "why": warum die Aussage richtig oder falsch ist, bei Zahlen mit Rechenweg.
+
 ANFORDERUNGEN DES NUTZERS (haben Vorrang):
 ${o.req || '(keine)'}
 
@@ -1692,6 +1704,7 @@ AUSGABE: Eine Frage pro Zeile als eigenständiges JSON-Objekt (JSON Lines), ohne
 {"type":"single","question":"…","options":[{"text":"…","correct":true,"why":"…"},{"text":"…","correct":false,"why":"…"}],"slide":7,"topic":"…","level":"Anwenden"}
 {"type":"multi","question":"…","options":[{"text":"…","correct":true,"why":"…"},{"text":"…","correct":false,"why":"…"}],"slide":9,"topic":"…","level":"Verstehen"}
 {"type":"open","question":"…","modelAnswer":"…","rubric":[{"point":"…","points":1}],"slide":11,"topic":"…","level":"Analysieren"}
+{"type":"block","question":"…","options":[{"text":"…","correct":true,"why":"…"},{"text":"…","correct":false,"why":"…"}],"slide":5,"topic":"…","level":"Anwenden"}
 
 MATERIAL:
 ${materialBlock(chunk.units)}`;
@@ -1739,10 +1752,10 @@ function renderQuizResume() {
   const left = quizRun ? quizRun.jobs.filter(j => !j.done).length : 0;
   box.hidden = !quizRun || !$('#stop-quiz').hidden || (live && !left);
   if (box.hidden) return;
-  const n = (quizRun.questions || []).length, total = quizRun.jobs.length;
+  const n = (quizRun.questions || []).length, total = quizRun.jobs.length, unit = quizRun.jobs.some(j => j.tasks) ? 'Aufgaben' : 'Fragen';
   const name = quizRun.opts.title || 'Quiz';
   fill(box,
-    el('span', { text: left ? `Unterbrochen: ${name}, ${total - left} von ${total} Teilen fertig, ${n} Fragen sind gesichert.` : `${name} mit ${n} Fragen ist fertig erstellt und wartet.` }),
+    el('span', { text: left ? `Unterbrochen: ${name}, ${total - left} von ${total} Teilen fertig, ${n} ${unit} sind gesichert.` : `${name} mit ${n} ${unit} ist fertig erstellt und wartet.` }),
     el('button', { type: 'button', class: 'btn small primary', onclick: resumeQuiz }, left ? 'Fortsetzen' : 'Starten'),
     el('button', { type: 'button', class: 'btn small ghost', onclick: () => { quizRun = null; saveQuizRun(); renderQuizResume(); } }, 'Verwerfen'));
 }
@@ -1767,7 +1780,9 @@ function normalizeQuestions(arr, chunk, o) {
     let slide = parseInt(r.slide, 10); if (!nums.includes(slide)) slide = Number.isFinite(slide) ? slide : null;
     const q = { id: newId('q'), type, slide, fileName: chunk.fileName, topic: txt(r.topic).slice(0, 60) || 'Allgemein', level: txt(r.level) || '' };
     const stim = String(r.stimulus == null ? '' : r.stimulus).trim();
-    if (stim) q.stimulus = stim.slice(0, 4000);
+    if (stim) q.stimulus = stim.slice(0, 8000);
+    const task = parseInt(r.task, 10);
+    if (task > 0) q.task = task;
     if (type === 'tf') {
       const ans = r.answer === true || r.answer === 'true' || r.answer === 'wahr' ? true : r.answer === false || r.answer === 'false' || r.answer === 'falsch' ? false : null;
       if (!txt(r.statement) || ans === null) continue;
@@ -1784,6 +1799,12 @@ function normalizeQuestions(arr, chunk, o) {
       if (!txt(r.question) || !txt(r.modelAnswer)) continue;
       if (!rubric.length) rubric = [{ point: txt(r.modelAnswer), points: 2 }];
       Object.assign(q, { question: txt(r.question), modelAnswer: txt(r.modelAnswer), rubric });
+    } else if (type === 'block') {
+      // Statements keep their order a, b, c; any number of them may be right, none or all included.
+      const list = Array.isArray(r.options) ? r.options : Array.isArray(r.statements) ? r.statements : [];
+      const opts = list.filter(x => x && txt(x.text)).map(x => ({ text: txt(x.text), correct: x.correct === true || x.correct === 'true', why: txt(x.why) }));
+      if (!txt(r.question) || opts.length < 2 || opts.length > 8) continue;
+      Object.assign(q, { question: txt(r.question), options: opts });
     } else continue;
     out.push(q);
   }
@@ -1797,23 +1818,26 @@ function setQuizBusy(b) {
 }
 let quizPaintTimer = 0;
 function scheduleQuizPaint() { if (!quizPaintTimer) quizPaintTimer = setTimeout(() => { quizPaintTimer = 0; paintQuizProgress(); }, 300); }
+// Parallel-exam tasks come from an old exam's blueprint, not from slides.
+const EXAM_CHUNK = { units: [], fileName: '' };
 async function runQuizJob(job, o) {
   job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0;
   pendingQuestions = pendingQuestions.filter(q => q.job !== job.key);
   paintQuizProgress();
+  const unit = job.tasks ? ' Aufgaben' : ' Fragen';
   try {
-    await streamItems(quizPrompt(job.chunk, job.plan, job.tfTrue, o), {
-      tier: o.tier, effort: EFFORT.quiz, signal: quizCtl.signal,
+    await streamItems(job.tasks ? examPrompt(job.tasks, o) : quizPrompt(job.chunk, job.plan, job.tfTrue, o), {
+      tier: o.tier, effort: job.tasks ? EFFORT.exam : EFFORT.quiz, signal: quizCtl.signal,
       onItem: r => {
-        const q = normalizeQuestions([r], job.chunk, o)[0];
+        const q = normalizeQuestions([r], job.chunk || EXAM_CHUNK, o)[0];
         if (!q) return;
         q.job = job.key; pendingQuestions.push(q);
-        job.n++; job.live = job.n + ' Fragen';
+        job.n++; job.live = job.n + unit;
         scheduleQuizPaint();
       },
     });
     if (!job.n) throw { code: 'bad_shape' };
-    job.status = 'fertig'; job.done = job.n + ' Fragen';
+    job.status = 'fertig'; job.done = job.n + unit + (job.tasks && job.n < job.tasks.length ? ` von ${job.tasks.length}` : '');
   } catch (e) {
     if (e && e.code === 'refused') pendingQuestions = pendingQuestions.filter(q => q.job !== job.key);
     if (e && e.code === 'cancelled') job.status = 'abgebrochen';
@@ -1858,7 +1882,7 @@ async function generateQuiz(override) {
   const jobs = [];
   chunks.forEach((chunk, i) => {
     if (!quotas[i]) return;
-    const plan = { tf: 0, single: 0, multi: 0, open: 0 };
+    const plan = { tf: 0, single: 0, multi: 0, open: 0, block: 0 };
     slots.slice(pos, pos + quotas[i]).forEach(t => { plan[t]++; });
     pos += quotas[i];
     const tfTrue = plan.tf ? (Math.random() < 0.5 ? Math.ceil(plan.tf / 2) : Math.floor(plan.tf / 2)) : 0;
@@ -1874,8 +1898,8 @@ async function resumeQuiz() {
   if (!quizRun) return;
   if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }
   const o = quizRun.opts;
-  quizJobs = quizRun.jobs.map(j => ({ key: j.key, chunk: chunkFromRefs(j.refs), plan: j.plan, tfTrue: j.tfTrue, opts: o, label: j.label, status: j.done ? 'fertig' : 'wartet', done: j.doneText || '' }));
-  if (quizJobs.some(j => !j.chunk && j.status !== 'fertig')) { quizJobs = []; msg.textContent = MATERIAL_GONE; return; }
+  quizJobs = quizRun.jobs.map(j => ({ key: j.key, chunk: j.refs ? chunkFromRefs(j.refs) : null, tasks: j.tasks || null, plan: j.plan, tfTrue: j.tfTrue, opts: o, label: j.label, status: j.done ? 'fertig' : 'wartet', done: j.doneText || '' }));
+  if (quizJobs.some(j => !j.chunk && !j.tasks && j.status !== 'fertig')) { quizJobs = []; msg.textContent = MATERIAL_GONE; return; }
   pendingQuestions = quizRun.questions || [];
   await continueQuiz();
 }
@@ -1891,27 +1915,121 @@ async function continueQuiz() {
 function startQuiz() {
   const o = quizJobs.length ? quizJobs[0].opts : readQuizOpts();
   const title = o.title || $('#lecture').value.trim() || $('#course').value.trim() || 'Quiz';
-  state.quiz = newQuizState(shuffle(pendingQuestions.map(q => { const c = Object.assign({}, q); delete c.job; return c; })), o, title, o.timeLimitMin);
+  const qs = pendingQuestions.map(q => { const c = Object.assign({}, q); delete c.job; return c; });
+  // A practice exam keeps the order of its model exam; quizzes are shuffled.
+  state.quiz = newQuizState(o.keepOrder ? qs.sort((a, b) => (a.task || 999) - (b.task || 999)) : shuffle(qs), o, title, o.timeLimitMin);
   quizRun = null; saveQuizRun();
   saveQuiz(); showQuizView();
 }
 function newQuizState(questions, o, title, timeLimitMin) {
-  return { title, created: new Date().toISOString(), settings: { scoring: o.scoring, mode: o.mode, tier: o.tier, k: o.k, tfPenalty: !!o.tfPenalty }, questions, answers: {}, results: {}, checked: {}, idx: 0, submitted: false, timeLimitMin: timeLimitMin || null, startedAt: Date.now() };
+  return { title, created: new Date().toISOString(), settings: { scoring: o.scoring, mode: o.mode, tier: o.tier, k: o.k, tfPenalty: !!o.tfPenalty, keepOrder: !!o.keepOrder, rules: o.rules || null }, questions, answers: {}, results: {}, checked: {}, idx: 0, submitted: false, timeLimitMin: timeLimitMin || null, startedAt: Date.now() };
 }
-// A full mock exam in the recognized style: number of tasks, time, scoring and task types follow the old exams.
+// Old exams of the current subject that have a blueprint and belong to the subject.
+function blueprintExams(subject) {
+  return state.exams.filter(e => examSubjectOf(e) === subject && e.blueprint && e.blueprint.subjectOk);
+}
+// The tasks a practice exam is built from: all tasks of one old exam, or a fresh mix from all of them.
+function examTemplateTasks(subject, which) {
+  const exams = blueprintExams(subject);
+  if (!exams.length) return null;
+  const withPos = e => e.blueprint.tasks.map((t, i, a) => Object.assign({ from: e.name, pos: i / Math.max(1, a.length - 1) }, t));
+  const one = exams.find(e => e.id === which);
+  if (one) return { tasks: withPos(one), exam: one };
+  // Mix: typical length, each topic once where possible, ordered from basics to cases like the originals.
+  const sizes = exams.map(e => e.blueprint.tasks.length).sort((a, b) => a - b);
+  const target = sizes[Math.floor(sizes.length / 2)];
+  const pool = shuffle(exams.flatMap(withPos));
+  const seen = new Set(), picked = [];
+  for (const t of pool) { const k = t.topic.toLowerCase(); if (picked.length < target && !seen.has(k)) { seen.add(k); picked.push(t); } }
+  for (const t of pool) if (picked.length < target && !picked.includes(t)) picked.push(t);
+  return { tasks: picked.sort((a, b) => a.pos - b.pos), exam: null };
+}
+async function generateExam(tasks, o) {
+  const msg = $('#gen-quiz-msg'); msg.textContent = '';
+  if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }
+  // Three tasks per call, so a nine-task exam is written by three calls at once.
+  const t0 = Date.now(), jobs = [];
+  for (let i = 0; i < tasks.length; i += 3) {
+    const part = tasks.slice(i, i + 3).map((t, j) => Object.assign({}, t, { slot: i + j + 1 }));
+    jobs.push({ key: 'p' + i + '-' + t0, tasks: part, opts: o, label: `Aufgaben ${i + 1}–${i + part.length}: ${part.map(t => t.topic).join(', ')}`, status: 'wartet' });
+  }
+  quizJobs = jobs; pendingQuestions = [];
+  quizRun = { opts: o, jobs: jobs.map(j => ({ key: j.key, label: j.label, tasks: j.tasks, done: false })), questions: [] };
+  saveQuizRun();
+  await continueQuiz();
+}
+// A full practice exam: tasks, topics, time and scoring follow the chosen old exam (or a mix of all).
 function startMockExam() {
   const st = currentStyle();
   if (!st) return;
+  const subject = currentSubject();
+  const which = store.get('mockTemplate', 'mix');
+  const tpl = examTemplateTasks(subject, which);
+  if (tpl) {
+    const bp = tpl.exam ? tpl.exam.blueprint : null;
+    generateExam(tpl.tasks, Object.assign(styleOpts(st), {
+      types: Array.from(new Set(tpl.tasks.map(t => t.type))), mode: 'klausur', level: 'klausur', tier: $('#q-tier').value, req: $('#quiz-req').value.trim(),
+      scoring: st.mcScoring === 'all' ? 'all' : 'partial', tfPenalty: bp ? bp.penalty : st.tfPenalty, keepOrder: true,
+      rules: bp && bp.rules.length ? bp.rules : st.rules || [], subject,
+      timeLimitMin: (bp && bp.durationMin) || st.durationMin || null,
+      title: `Probeklausur ${subject}${tpl.exam ? ' nach ' + tpl.exam.name : ' (Mix)'}`,
+    }));
+    return;
+  }
+  // Styles recognized before blueprints existed: build the exam from the lecture material.
   const count = Math.max(5, Math.min(60, st.questionCount || 30));
   const share = st.questionCount ? Math.min(1, count / st.questionCount) : 1;
   const timeLimitMin = st.durationMin ? Math.max(5, Math.round(st.durationMin * share)) : null;
   generateQuiz(Object.assign(styleOpts(st), { count, mode: 'klausur', level: 'klausur', scoring: st.mcScoring, tfPenalty: st.tfPenalty, timeLimitMin, title: 'Probeklausur ' + currentSubject() }));
 }
 function mockExamHint(st) {
+  const tpl = examTemplateTasks(currentSubject(), store.get('mockTemplate', 'mix'));
+  if (tpl) {
+    const time = (tpl.exam && tpl.exam.blueprint.durationMin) || st.durationMin;
+    return `${tpl.tasks.length} Aufgaben${time ? `, ${time} Minuten` : ''}. ${tpl.exam ? 'Gleiche Themen und Aufgabenarten wie diese Klausur' : 'Aufgaben aus allen Altklausuren, jedes Mal neu gemischt'}, mit neuen Aussagen und Zahlen.`;
+  }
   const count = Math.max(5, Math.min(60, st.questionCount || 30));
   const share = st.questionCount ? Math.min(1, count / st.questionCount) : 1;
   const time = st.durationMin ? Math.max(5, Math.round(st.durationMin * share)) : null;
-  return `${count} Aufgaben${time ? `, ${time} Minuten` : ''}, Inhalte aus deinem Vorlesungsmaterial`;
+  return `${count} Aufgaben${time ? `, ${time} Minuten` : ''}, Inhalte aus deinem Vorlesungsmaterial. Lass den Klausurstil neu erkennen, damit Probeklausuren den Altklausuren folgen.`;
+}
+function examPrompt(tasks, o) {
+  const st = o.examStyle || {};
+  const task = t => [
+    `### Vorlage ${t.slot} (aus ${t.from}, dort Aufgabe ${t.n}) · Typ: ${t.type} · Thema: ${t.topic}${t.kind ? ' · ' + t.kind : ''}`,
+    t.stem ? 'Aufgabenstellung: ' + t.stem : '',
+    t.stimulus ? 'Material:\n' + t.stimulus : '',
+    t.formula ? 'Formelsammlung: ' + t.formula : '',
+    t.items.length ? 'Aussagen bzw. Optionen:\n' + t.items.map((x, i) => `${String.fromCharCode(97 + i)}. ${x.text}${x.correct === true ? '  [richtig]' : x.correct === false ? '  [falsch]' : ''}`).join('\n') : '',
+    t.answer ? 'Lösung: ' + t.answer : '',
+  ].filter(Boolean).join('\n');
+  return `Du schreibst eine Parallelklausur im Fach ${o.subject || st.subject || 'Psychologie'}. Ziel: Aufgaben, die genau so in der nächsten echten Klausur stehen könnten.
+
+ZU JEDER VORLAGE SCHREIBST DU GENAU EINE NEUE AUFGABE:
+- Gleiches Thema, gleiche Aufgabenart, gleicher Typ, gleiche Anzahl Aussagen bzw. Optionen, gleiches Niveau und gleicher Umfang wie die Vorlage.
+- Neuer Inhalt: andere Aussagen, andere Facetten desselben Themas, neue Personen und neue Zahlen. Keine Aussage darf mit der Vorlage übereinstimmen oder nur umformuliert sein.
+- Formulierung wie in der Klausur: Aufbau des Aufgabenstamms, Fachbegriffe und Formelzeichen genau wie in der Vorlage (z. B. „Im Folgenden finden Sie eine Reihe von Aussagen zu … Welche der Aussagen sind richtig?“).
+- Hat die Vorlage Material (Fall mit Zahlen, R-Output, Tabelle, Grafik, Formelsammlung), schreibe neues Material derselben Art in "stimulus": einen vollständigen, realistischen R-Output im selben Format, eine Grafik als genaue Beschreibung in Worten, abgedruckte Formeln als Zeile „Formelsammlung: …“. Alle Zahlen sind in sich stimmig (z. B. Freiheitsgrade, p-Werte, Fit-Indizes, Ladungen und Reliabilitäten passen zusammen).
+- Rechne jede Aussage mit Zahlen selbst nach, bevor du sie als richtig oder falsch markierst. Runde wie in den Regeln der Klausur. Schreibe den Rechenweg in "why".
+- Richtig und falsch gemischt wie in den Altklausuren: pro Aufgabe sind ${st.correctPerQuestion || 'keine bis alle'} Aussagen richtig. Falsche Aussagen sind plausibel (typische Verwechslungen, Vorzeichen- oder Rundungsfehler, falsche Schlussfolgerungen), nie offensichtlich.
+- Jede Aussage ist fachlich eindeutig richtig oder falsch, ohne Spitzfindigkeiten.
+- Nur Stoff, der zum Thema der Vorlage gehört (dieselben Theorien, Modelle und Kennwerte), auf ihrem Niveau.
+- "why" bei jeder Aussage bzw. Option, "explanation" bei Wahr/Falsch, "modelAnswer" und "rubric" bei offenen Aufgaben. Nur reiner Text, kein HTML, kein Markdown.
+
+REGELN DER KLAUSUR:
+${(o.rules && o.rules.length ? o.rules : st.rules || []).map(r => '- ' + r).join('\n') || '- (keine angegeben)'}
+
+ANFORDERUNGEN DES NUTZERS (haben Vorrang):
+${o.req || '(keine)'}
+
+AUSGABE: Eine Aufgabe pro Zeile als eigenständiges JSON-Objekt (JSON Lines) in der Reihenfolge der Vorlagen, ohne Codeblock, ohne weiteren Text und ohne Zeilenumbruch innerhalb eines Objekts (Zeilenumbrüche im Material als \\n). "task" ist die Nummer der Vorlage.
+{"task":1,"type":"block","question":"…","stimulus":"…","options":[{"text":"…","correct":true,"why":"…"},{"text":"…","correct":false,"why":"…"}],"topic":"…","level":"Anwenden"}
+{"task":2,"type":"single","question":"…","options":[{"text":"…","correct":true,"why":"…"}],"topic":"…","level":"Verstehen"}
+{"task":3,"type":"tf","statement":"…","answer":true,"explanation":"…","topic":"…","level":"Verstehen"}
+{"task":4,"type":"open","question":"…","modelAnswer":"…","rubric":[{"point":"…","points":1}],"topic":"…","level":"Analysieren"}
+
+VORLAGEN:
+${tasks.map(task).join('\n\n')}`;
 }
 
 /* ---------- Quiz: Bewertung ---------- */
@@ -1924,9 +2042,15 @@ function autoScore(q, a, scoring, tfPenalty) {
     const right = q.options.filter((x, i) => x.correct === sel.has(i)).length;
     return { score: scoring === 'partial' ? right / q.options.length : right === q.options.length ? 1 : 0, max: 1 };
   }
+  if (q.type === 'block') {
+    // Each statement counts on its own: ticked if right, left empty if wrong. With a penalty a wrong judgement costs a point.
+    const sel = new Set(Array.isArray(a) ? a : []);
+    const right = q.options.filter((x, i) => x.correct === sel.has(i)).length;
+    return { score: tfPenalty ? right - (q.options.length - right) : right, max: q.options.length };
+  }
   return null;
 }
-const maxOf = q => q.type === 'open' ? q.rubric.reduce((a, r) => a + r.points, 0) : 1;
+const maxOf = q => q.type === 'open' ? q.rubric.reduce((a, r) => a + r.points, 0) : q.type === 'block' ? q.options.length : 1;
 function resultOf(q) {
   const qz = state.quiz;
   if (q.type === 'open') return qz.results[q.id] || null;
@@ -1936,6 +2060,7 @@ function resultOf(q) {
 function isAnswered(q) {
   const a = state.quiz.answers[q.id];
   if (q.type === 'multi') return Array.isArray(a) && a.length > 0;
+  if (q.type === 'block') return Array.isArray(a);
   if (q.type === 'open') return typeof a === 'string' && a.trim().length > 0;
   return a != null;
 }
@@ -1987,7 +2112,7 @@ function renderQuestion() {
   }));
   const head = el('div', { class: 'qhead' },
     el('div', { class: 'actions' },
-      el('span', { class: 'chip', text: `Frage ${qz.idx + 1} / ${qz.questions.length}` }),
+      el('span', { class: 'chip', text: `${q.type === 'block' ? 'Aufgabe' : 'Frage'} ${qz.idx + 1} / ${qz.questions.length}` }),
       el('span', { class: 'chip type', text: QTYPE_LABEL[q.type] }),
       q.level ? el('span', { class: 'chip', text: q.level }) : null,
       el('span', { class: 'topic', text: q.topic + (q.slide ? ' · Folie ' + q.slide : '') }),
@@ -2003,8 +2128,8 @@ function renderQuestion() {
         el('input', { type: 'radio', name, checked: a === v || null, disabled: shown || null, onchange: () => setAns(v) }),
         el('span', { class: 'otext', text: v === null ? 'Keine Angabe' : v ? 'Wahr' : 'Falsch' }));
     }));
-  } else if (q.type === 'single' || q.type === 'multi') {
-    const multi = q.type === 'multi';
+  } else if (q.type === 'single' || q.type === 'multi' || q.type === 'block') {
+    const multi = q.type !== 'single';
     const sel = multi ? new Set(Array.isArray(a) ? a : []) : null;
     body = el('div', { class: 'opts' }, ...q.options.map((opt, i) => {
       const picked = multi ? sel.has(i) : a === i;
@@ -2015,7 +2140,7 @@ function renderQuestion() {
           if (multi) { const s = new Set(Array.isArray(qz.answers[q.id]) ? qz.answers[q.id] : []); e.target.checked ? s.add(i) : s.delete(i); setAns(Array.from(s).sort((x, y) => x - y)); }
           else setAns(i);
         } }),
-        el('span', { class: 'otext', text: String.fromCharCode(65 + i) + ') ' + opt.text }),
+        el('span', { class: 'otext', text: letter(q, i) + (q.type === 'block' ? '. ' : ') ') + opt.text }),
         shown && opt.why ? el('span', { class: 'why', text: (opt.correct ? 'Richtig: ' : 'Falsch: ') + opt.why }) : null);
     }));
   } else {
@@ -2024,7 +2149,7 @@ function renderQuestion() {
     let t; ta.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => setAns(ta.value), 300); qz.answers[q.id] = ta.value; });
     body = el('label', {}, el('span', { class: 'lbl', text: `Deine Antwort (${fmt(maxOf(q))} Punkte)` }), ta);
   }
-  const instr = q.type === 'multi' ? `Mehrfachauswahl: 1 bis ${q.options.length - 1} Antworten sind richtig.` : q.type === 'single' ? 'Genau eine Antwort ist richtig.' : q.type === 'tf' ? (qz.settings.tfPenalty ? 'Ist die Aussage wahr oder falsch? Eine falsche Antwort kostet einen Punkt, „Keine Angabe“ zählt 0.' : 'Ist die Aussage wahr oder falsch?') : '';
+  const instr = q.type === 'block' ? `Kreuzen Sie jede richtige Aussage an. Es können keine bis alle Aussagen richtig sein. Jede richtig beurteilte Aussage zählt 1 Punkt${qz.settings.tfPenalty ? ', jede falsch beurteilte kostet 1 Punkt' : ''}.` : q.type === 'multi' ? `Mehrfachauswahl: 1 bis ${q.options.length - 1} Antworten sind richtig.` : q.type === 'single' ? 'Genau eine Antwort ist richtig.' : q.type === 'tf' ? (qz.settings.tfPenalty ? 'Ist die Aussage wahr oder falsch? Eine falsche Antwort kostet einen Punkt, „Keine Angabe“ zählt 0.' : 'Ist die Aussage wahr oder falsch?') : '';
   const status = el('p', { class: 'msg', role: 'status' });
   const fb = shown ? feedbackBlock(q) : null;
   const last = qz.idx === qz.questions.length - 1;
@@ -2036,7 +2161,8 @@ function renderQuestion() {
         if (!isAnswered(q)) { status.textContent = 'Schreib zuerst eine Antwort.'; return; }
         const b = e.currentTarget; b.disabled = true; status.className = 'msg'; status.textContent = 'Claude bewertet deine Antwort …';
         try { await gradeOpen(q); } catch (err) { b.disabled = false; status.className = 'msg err'; status.textContent = errText(err); return; }
-      } else if (!isAnswered(q)) { status.textContent = 'Wähle zuerst eine Antwort.'; return; }
+      } else if (q.type === 'block') { if (!Array.isArray(qz.answers[q.id])) qz.answers[q.id] = []; }
+      else if (!isAnswered(q)) { status.textContent = 'Wähle zuerst eine Antwort.'; return; }
       qz.checked[q.id] = true; saveQuiz(); renderQuestion();
     } }, 'Antwort prüfen'));
     nav.append(el('button', { type: 'button', class: 'btn ghost', onclick: () => { qz.checked[q.id] = true; if (q.type === 'open' && !qz.results[q.id]) qz.results[q.id] = { score: 0, max: maxOf(q), awarded: q.rubric.map(() => ({ reached: 0, comment: '' })), feedback: 'Übersprungen.' }; saveQuiz(); renderQuestion(); } }, 'Lösung zeigen'));
@@ -2046,6 +2172,7 @@ function renderQuestion() {
   if (last && (!learn || shown)) nav.append(el('button', { type: 'button', class: 'btn primary', onclick: e => submitQuiz(e.currentTarget, status) }, learn ? 'Auswertung' : 'Abgeben'));
   else if (!learn) nav.append(el('button', { type: 'button', class: 'btn ghost', onclick: e => submitQuiz(e.currentTarget, status) }, 'Abgeben'));
   fill(box, head, dots,
+    qz.settings.rules && qz.settings.rules.length && qz.idx === 0 ? el('details', { class: 'method' }, el('summary', { text: 'Hinweise zur Klausur' }), el('ul', {}, ...qz.settings.rules.map(r => el('li', { text: r })))) : null,
     q.stimulus ? el('pre', { class: 'stimulus', text: q.stimulus }) : null,
     el('p', { class: 'qtext', text: q.type === 'tf' ? q.statement : q.question }),
     instr ? el('p', { class: 'qinstr', text: instr }) : null,
@@ -2080,7 +2207,7 @@ function feedbackBlock(q) {
   const vt = { ok: 'Richtig', bad: q.type === 'open' ? 'Noch nicht ausreichend' : 'Falsch', part: 'Teilweise richtig' }[v] || 'Nicht bewertet';
   const parts = [el('p', {}, el('span', { class: 'verdict ' + (v || 'bad'), text: vt }), r ? el('span', { class: 'mono muted', text: `  ${fmt(r.score)} / ${fmt(r.max)} P.` }) : null)];
   if (q.type === 'tf') parts.push(el('p', { text: `Die Aussage ist ${q.answer ? 'wahr' : 'falsch'}. ${q.explanation || ''}` }));
-  if (q.type === 'multi' || q.type === 'single') parts.push(el('p', { class: 'hint', text: 'Richtig: ' + correctIdx(q).map(i => String.fromCharCode(65 + i)).join(', ') }));
+  if (q.type === 'multi' || q.type === 'single' || q.type === 'block') { const ci = correctIdx(q); parts.push(el('p', { class: 'hint', text: ci.length ? 'Richtig: ' + ci.map(i => letter(q, i)).join(', ') : 'Keine der Aussagen ist richtig.' })); }
   if (q.type === 'open') {
     if (r && r.awarded) parts.push(el('ul', { class: 'rub' }, ...q.rubric.map((p, i) => el('li', {},
       el('span', { class: 'pts', text: `${fmt((r.awarded[i] || {}).reached || 0)}/${fmt(p.points)}` }),
@@ -2146,7 +2273,7 @@ function renderResult() {
       el('button', { type: 'button', class: 'btn small', onclick: async e => { const b = e.currentTarget; b.disabled = true; const err = await gradeMany(ungraded.map(x => x.q)); renderResult(); if (err) { const m = $('#quiz-result p.msg'); if (m) { m.className = 'msg err'; m.textContent = errText(err); } } } }, 'Jetzt bewerten')) : null,
     el('div', { class: 'actions' },
       wrong.length ? el('button', { type: 'button', class: 'btn primary', onclick: () => { state.quiz = newQuizState(shuffle(wrong.map(x => JSON.parse(JSON.stringify(x.q)))), qz.settings, qz.title + ' (Wiederholung)'); saveQuiz(); showQuizView(); } }, 'Falsche wiederholen') : null,
-      el('button', { type: 'button', class: 'btn', onclick: () => { state.quiz = newQuizState(shuffle(qz.questions.map(q => JSON.parse(JSON.stringify(q)))), qz.settings, qz.title, qz.timeLimitMin); saveQuiz(); showQuizView(); } }, 'Nochmal komplett'),
+      el('button', { type: 'button', class: 'btn', onclick: () => { const qs = qz.questions.map(q => JSON.parse(JSON.stringify(q))); state.quiz = newQuizState(qz.settings.keepOrder ? qs : shuffle(qs), qz.settings, qz.title, qz.timeLimitMin); saveQuiz(); showQuizView(); } }, 'Nochmal komplett'),
       wrong.length ? el('button', { type: 'button', class: 'btn', onclick: () => exportWrongAsCards(wrong.map(x => x.q), msg) }, 'Falsche als Anki-Karten') : null,
       el('button', { type: 'button', class: 'btn', onclick: () => saveQuizFile(msg) }, 'Quiz speichern'),
       el('button', { type: 'button', class: 'btn ghost', onclick: () => { state.quiz = null; saveQuiz(); showQuizView(); } }, 'Neues Quiz')),
@@ -2155,17 +2282,17 @@ function renderResult() {
     el('h3', { text: 'Nach Fragetyp' }), table('Fragetyp', byKey(q => q.type, q => QTYPE_LABEL[q.type])),
     el('h3', { text: 'Alle Fragen' }),
     el('div', { class: 'review' }, ...rows.map(({ q }, i) => el('div', { class: 'review-item' },
-      el('div', { class: 'actions' }, el('span', { class: 'chip', text: 'Frage ' + (i + 1) }), el('span', { class: 'chip type', text: QTYPE_LABEL[q.type] }), el('span', { class: 'topic', text: q.topic + (q.slide ? ' · Folie ' + q.slide : '') })),
+      el('div', { class: 'actions' }, el('span', { class: 'chip', text: (q.type === 'block' ? 'Aufgabe ' : 'Frage ') + (i + 1) }), el('span', { class: 'chip type', text: QTYPE_LABEL[q.type] }), el('span', { class: 'topic', text: q.topic + (q.slide ? ' · Folie ' + q.slide : '') })),
       q.stimulus ? el('pre', { class: 'stimulus', text: q.stimulus }) : null,
       el('p', { style: 'font-weight:600', text: q.type === 'tf' ? q.statement : q.question }),
-      q.type === 'single' || q.type === 'multi' ? reviewOptions(q) : q.type === 'open' ? el('p', { class: 'hint', text: 'Deine Antwort: ' + (String(qz.answers[q.id] || '').trim() || '(keine)') }) : el('p', { class: 'hint', text: 'Deine Antwort: ' + (qz.answers[q.id] === true ? 'Wahr' : qz.answers[q.id] === false ? 'Falsch' : '(keine)') }),
+      q.type === 'single' || q.type === 'multi' || q.type === 'block' ? reviewOptions(q) : q.type === 'open' ? el('p', { class: 'hint', text: 'Deine Antwort: ' + (String(qz.answers[q.id] || '').trim() || '(keine)') }) : el('p', { class: 'hint', text: 'Deine Antwort: ' + (qz.answers[q.id] === true ? 'Wahr' : qz.answers[q.id] === false ? 'Falsch' : '(keine)') }),
       feedbackBlock(q)))));
 }
 function reviewOptions(q) {
   const a = state.quiz.answers[q.id];
-  const sel = new Set(q.type === 'multi' ? (Array.isArray(a) ? a : []) : a != null ? [a] : []);
+  const sel = new Set(q.type === 'single' ? (a != null ? [a] : []) : Array.isArray(a) ? a : []);
   return el('ul', { class: 'rub' }, ...q.options.map((o, i) => el('li', {},
-    el('span', { class: 'pts', text: (sel.has(i) ? '☒ ' : '☐ ') + String.fromCharCode(65 + i) }),
+    el('span', { class: 'pts', text: (sel.has(i) ? '☒ ' : '☐ ') + letter(q, i) }),
     el('span', { class: o.correct ? 'verdict ok' : '', text: o.text }),
     o.why ? el('span', { class: 'cm', text: o.why }) : null)));
 }
@@ -2175,8 +2302,9 @@ function questionToCard(q) {
   if (q.type === 'tf') { front = `Wahr oder falsch? „${e(q.statement)}“`; back = `<ul><li><b>${q.answer ? 'Wahr' : 'Falsch'}</b></li>${q.explanation ? `<li>${e(q.explanation)}</li>` : ''}</ul>`; }
   else if (q.type === 'open') { front = e(q.question); back = '<ul>' + q.rubric.map(r => `<li>${e(r.point)}</li>`).join('') + '</ul>'; }
   else {
-    front = `${e(q.question)}<ol type="A">${q.options.map(o => `<li>${e(o.text)}</li>`).join('')}</ol>`;
-    back = `<ul><li><b>Richtig: ${correctIdx(q).map(i => String.fromCharCode(65 + i)).join(', ')}</b></li>${q.options.map((o, i) => o.why ? `<li>${String.fromCharCode(65 + i)}: ${e(o.why)}</li>` : '').join('')}</ul>`;
+    const ci = correctIdx(q);
+    front = `${e(q.question)}<ol type="${q.type === 'block' ? 'a' : 'A'}">${q.options.map(o => `<li>${e(o.text)}</li>`).join('')}</ol>`;
+    back = `<ul><li><b>${ci.length ? 'Richtig: ' + ci.map(i => letter(q, i)).join(', ') : 'Keine Aussage ist richtig'}</b></li>${q.options.map((o, i) => o.why ? `<li>${letter(q, i)}: ${e(o.why)}</li>` : '').join('')}</ul>`;
   }
   if (q.stimulus) front = `<pre>${e(q.stimulus)}</pre>` + front;
   const f = state.files.find(x => x.name === q.fileName);
@@ -2213,7 +2341,10 @@ async function loadQuizFile(file) {
 const examDocs = new Map(); // exam id -> pdf.js document, this session only (needed for scanned pages)
 function saveExams() {
   store.set('examStyles', state.examStyles);
-  if (!store.set('exams', state.exams)) store.set('exams', state.exams.map(({ text, ...e }) => e));
+  // If storage is full, drop the exam texts first, then the long materials in the blueprints.
+  if (store.set('exams', state.exams)) return;
+  if (store.set('exams', state.exams.map(({ text, ...e }) => e))) return;
+  store.set('exams', state.exams.map(({ text, ...e }) => e.blueprint ? Object.assign(e, { blueprint: Object.assign({}, e.blueprint, { tasks: e.blueprint.tasks.map(t => Object.assign({}, t, { stimulus: t.stimulus.slice(0, 600) })) }) }) : e));
 }
 async function addExams(list) {
   $('#exam-msg').textContent = '';
@@ -2260,36 +2391,106 @@ function removeExam(id) {
   examImages.delete(id);
   saveExams(); renderExamPanel();
 }
-function examStylePrompt(text, nImages, subject, imageNote) {
-  return `Du analysierst Altklausuren aus einem Psychologie-Studium, um ihr Prüfungsformat für Übungsklausuren genau nachzubilden. Beschreibe Format und Stil, nicht die Inhalte.
+const examLive = e => examDocs.has(e.id) || examImages.has(e.id);
+// Every page goes along as an image (up to the request limit): R outputs, figures and filled-in answer sheets are often pictures.
+async function examPageImages(e) {
+  const max = Math.min(caps.imageMax || 0, 20);
+  const doc = examDocs.get(e.id), photos = examImages.get(e.id);
+  const out = [];
+  if (!max) return out;
+  if (doc) { for (let n = 1; n <= Math.min(doc.numPages, max); n++) { const b = await drawPage(doc, n, 1300, 0.82); if (b) out.push(b); } }
+  else if (photos) { for (const f of photos.slice(0, max)) out.push(await shrinkJpeg(f, 1400)); }
+  return out;
+}
+function blueprintPrompt(e, subject, nImages) {
+  const pages = e.photos ? e.pages : e.pages || nImages;
+  return `Du erstellst den genauen Bauplan einer Altklausur aus einem Psychologie-Studium. Daraus entstehen später Parallelklausuren mit denselben Aufgaben, Themen und Formen, aber neuen Aussagen und Zahlen. Arbeite deshalb vollständig und wörtlich.
 
 FACH: ${subject}
-Alle Dateien sollen Altklausuren dieses Fachs sein. Prüfe das: Gehört eine Datei erkennbar zu einem anderen Fach (z. B. Statistik statt Diagnostik), trage sie in "mismatches" ein und lass sie bei der Analyse weg.
+DATEI: ${e.name}
+${nImages ? `Die Klausur liegt als ${nImages} Seitenbilder bei (Bild 1 = Seite 1${nImages < pages ? `; nur die ersten ${nImages} von ${pages} Seiten` : ''}). Lies auch Grafiken, R-Outputs, Tabellen, Formelsammlungen und einen ausgefüllten Antwortbogen oder eine Musterlösung; dort stehen die Lösungen.` : 'Es liegt nur der Text vor; Grafiken und Bilder fehlen.'}
 
 BESTIMME:
-- "shares": Anteile der Aufgabentypen in Prozent (Summe 100): "tf" = Aussagen, die als richtig oder falsch zu bewerten sind; "single" = Auswahlaufgabe mit genau einer richtigen Option; "multi" = Auswahlaufgabe, bei der mehrere Optionen richtig sein können; "open" = offene Fragen oder Rechenaufgaben mit Freitext.
-- "questionCount": typische Anzahl Aufgaben bzw. zu bewertender Aussagen pro Klausur. "durationMin": Bearbeitungszeit in Minuten. "totalPoints": Gesamtpunkte. Jeweils null, wenn nicht erkennbar.
-- "options": Anzahl Antwortoptionen bei Auswahlaufgaben. "correctPerQuestion": wie viele Optionen richtig sein können, z. B. "genau 1" oder "1 bis 4".
-- "tfPenalty": true, wenn falsche Antworten laut Klausur zu Punktabzug führen. "mcScoring": "partial" bei Teilpunkten pro Option, sonst "all".
-- "phrasing": 3–8 typische Aufgabenstämme oder Formulierungen, wörtlich.
-- "features": Besonderheiten, z. B. Aussagen zu R-Outputs, Rechenaufgaben mit Zahlen, Interpretation von Tabellen oder Grafiken, Fallvignetten, Definitionen, Studienbefunde.
-- "level": Schwierigkeitsniveau und geprüfte Denkstufen in einem Satz.
-- "examples": 3–6 repräsentative Aufgaben, gekürzt und möglichst wörtlich, mit Typ und, falls erkennbar, Lösung.
-- "summary": das Prüfungsformat in 2–3 Sätzen.
-- "mismatches": Dateien, die zu einem anderen Fach gehören, mit Grund, z. B. [{"file":"…","reason":"Statistik II: Regression und ANOVA"}]; sonst [].
-Enthält das Material Lösungen, nutze sie, um Antwortformat und Bewertung zu verstehen.${nImages ? `\nZusätzlich sind ${nImages} gescannte Klausurseiten als Bilder angehängt (${imageNote}).` : ''}
+- "subjectOk": false, wenn die Datei erkennbar zu einem anderen Fach gehört; dann in "reason" den Grund (z. B. "Statistik II: Regression und ANOVA"), sonst "".
+- "kind": "Klausur", "Probeklausur", "Gedächtnisprotokoll", "Beispielfragen" oder "Übung".
+- "durationMin", "totalPoints": laut Klausur, sonst null. "penalty": true, wenn falsche Antworten Punkte kosten.
+- "rules": die Bearbeitungs- und Bewertungsregeln knapp, aber vollständig (Punkte je Aussage, Punktabzug, Rundung, Signifikanzniveau, Hilfsmittel).
+- "tasks": ALLE Aufgaben in der Reihenfolge der Klausur, je Aufgabe:
+  "n": Nummer; "type": "block" (mehrere Aussagen, jede einzeln als richtig oder falsch zu beurteilen, z. B. „Welche der Aussagen sind richtig?“), "single" (genau eine Option richtig), "multi" (mehrere Optionen, als Ganzes bewertet), "tf" (einzelne Aussage), "open" (Freitext oder Rechnung);
+  "topic": Thema in 2–6 Wörtern; "kind": Aufgabenart, z. B. "Wissensaussagen", "Fallaufgabe mit Zahlen", "R-Output CFA (lavaan)", "Grafik eines Modells", "Rechenaufgabe";
+  "stem": Aufgabenstellung wörtlich; "stimulus": gemeinsames Material wörtlich (Fall, Zahlen, R-Output, Tabelle; eine Grafik genau in Worten), sonst "";
+  "formula": abgedruckte Formeln wörtlich, sonst ""; "items": Aussagen bzw. Optionen wörtlich als {"text":"…","correct":true|false|null} (laut Lösung oder Antwortbogen, sonst null);
+  "answer": Lösung einer offenen Aufgabe, sonst ""; "points": Punkte der Aufgabe oder null.
+- "notes": was an dieser Klausur auffällt (Schwerpunkte, Schwierigkeit, typische Fallen), 1–3 Sätze.
+Formelzeichen so, wie sie in der Klausur stehen (z. B. ϑ, ω, ε, τ). Nur reiner Text.
 
 AUSGABE: Antworte ausschließlich mit JSON in genau dieser Form:
-{"summary":"…","shares":{"tf":60,"single":0,"multi":30,"open":10},"questionCount":40,"durationMin":90,"totalPoints":null,"options":5,"correctPerQuestion":"1 bis 4","tfPenalty":false,"mcScoring":"all","phrasing":["…"],"features":["…"],"level":"…","examples":[{"type":"tf","text":"…","answer":"falsch"}],"mismatches":[]}
+{"subjectOk":true,"reason":"","kind":"Klausur","durationMin":90,"totalPoints":null,"penalty":false,"rules":["…"],"tasks":[{"n":"1","type":"block","topic":"…","kind":"…","stem":"…","stimulus":"","formula":"","items":[{"text":"…","correct":true}],"answer":"","points":null}],"notes":"…"}
 
-ALTKLAUSUREN:
-${text || '(nur Seitenbilder)'}`;
+TEXT DER KLAUSUR:
+${(e.text || '(nur Seitenbilder)').slice(0, 60000)}`;
 }
-function normalizeStyle(r, sources, subject) {
+function normalizeBlueprint(r) {
+  if (!r || typeof r !== 'object' || !Array.isArray(r.tasks)) throw { code: 'bad_shape' };
+  const s = (v, n) => String(v == null ? '' : v).trim().slice(0, n);
+  const num = (v, lo, hi) => { const n = Number(v); return v != null && v !== '' && Number.isFinite(n) && n >= lo && n <= hi ? Math.round(n * 10) / 10 : null; };
+  const tasks = r.tasks.filter(t => t && (s(t.stem, 5) || (Array.isArray(t.items) && t.items.length))).slice(0, 80).map((t, i) => ({
+    n: s(t.n, 8) || String(i + 1),
+    type: QTYPE_LABEL[t.type] ? t.type : 'block',
+    topic: s(t.topic, 80) || 'Allgemein',
+    kind: s(t.kind, 120),
+    stem: s(t.stem, 1500),
+    stimulus: s(t.stimulus, 6000),
+    formula: s(t.formula, 1000),
+    items: (Array.isArray(t.items) ? t.items : []).filter(x => x && s(x.text, 3)).slice(0, 10).map(x => ({ text: s(x.text, 800), correct: x.correct === true ? true : x.correct === false ? false : null })),
+    answer: s(t.answer, 2000),
+    points: num(t.points, 0, 300),
+  }));
+  if (!tasks.length) throw { code: 'bad_shape' };
+  return {
+    subjectOk: r.subjectOk !== false, reason: s(r.reason, 200), kind: s(r.kind, 40),
+    durationMin: num(r.durationMin, 10, 300), totalPoints: num(r.totalPoints, 1, 1000), penalty: r.penalty === true,
+    rules: (Array.isArray(r.rules) ? r.rules : []).map(x => s(x, 300)).filter(Boolean).slice(0, 12),
+    tasks, notes: s(r.notes, 600), created: new Date().toISOString(),
+  };
+}
+// A blueprint as compact text for the subject summary: the structure and stems, not the long materials.
+function blueprintDigest(e) {
+  const b = e.blueprint;
+  return [`=== ${e.name} (${b.kind || 'Klausur'}${b.durationMin ? ', ' + b.durationMin + ' min' : ''}${b.totalPoints ? ', ' + b.totalPoints + ' Punkte' : ''}${b.penalty ? ', mit Punktabzug' : ''}) ===`,
+    b.rules.length ? 'Regeln: ' + b.rules.join(' | ') : '',
+    b.notes ? 'Auffällig: ' + b.notes : '',
+    ...b.tasks.map(t => `${t.n}. [${t.type}; ${t.kind || '–'}] ${t.topic}: ${t.stem.slice(0, 300)}${t.stimulus ? ' [Material: ' + t.stimulus.slice(0, 160).replace(/\s+/g, ' ') + ' …]' : ''}${t.items.length ? ` (${t.items.length} Aussagen/Optionen, davon ${t.items.filter(x => x.correct === true).length} richtig${t.items.some(x => x.correct === null) ? ', Lösung teils unbekannt' : ''}; z. B. „${t.items[0].text.slice(0, 160)}“)` : ''}`),
+  ].filter(Boolean).join('\n');
+}
+function examStylePrompt(exams, subject) {
+  return `Du fasst den Prüfungsstil eines Fachs aus den Bauplänen seiner Altklausuren zusammen. Daraus entstehen Übungsaufgaben und Probeklausuren, die genau so in der echten Klausur stehen könnten.
+
+FACH: ${subject}
+
+BESTIMME:
+- "shares": Anteile der Aufgabentypen in Prozent (Summe 100): "block" = Aufgabe mit mehreren einzeln zu beurteilenden Aussagen; "tf" = einzelne Aussage richtig/falsch; "single" = genau eine Option richtig; "multi" = mehrere Optionen, als Ganzes bewertet; "open" = Freitext oder Rechnung.
+- "questionCount": typische Anzahl Aufgaben pro Klausur. "durationMin", "totalPoints": typische Werte, sonst null.
+- "statements": Anzahl Aussagen pro Aufgabe bei "block" als {"min":3,"max":5}, sonst null. "options": typische Anzahl Optionen bei single/multi.
+- "correctPerQuestion": wie viele Aussagen bzw. Optionen richtig sein können, z. B. "keine bis alle" oder "genau 1".
+- "tfPenalty": true, wenn falsche Antworten Punkte kosten. "mcScoring": "statement" (jede Aussage zählt einzeln), "partial" (Teilpunkte) oder "all" (alles oder nichts).
+- "rules": die Bearbeitungsregeln, die über jeder Probeklausur stehen sollten.
+- "phrasing": 3–8 typische Aufgabenstämme wörtlich. "features": Besonderheiten (R-Outputs, Rechenaufgaben, Grafiken, Fälle, Formelsammlung, Rundung).
+- "topics": geprüfte Themen mit Häufigkeit über alle Klausuren, häufigste zuerst, z. B. [{"topic":"Reliabilität","count":3}].
+- "level": Schwierigkeitsniveau und Denkstufen in einem Satz. "summary": das Prüfungsformat in 2–3 Sätzen.
+- "examples": 3–6 repräsentative Aufgaben wörtlich gekürzt, z. B. {"type":"block","text":"Stamm a. … b. …","answer":"a, b"}.
+
+AUSGABE: Antworte ausschließlich mit JSON in genau dieser Form:
+{"summary":"…","shares":{"block":100,"tf":0,"single":0,"multi":0,"open":0},"questionCount":9,"durationMin":90,"totalPoints":null,"statements":{"min":3,"max":5},"options":5,"correctPerQuestion":"keine bis alle","tfPenalty":false,"mcScoring":"statement","rules":["…"],"phrasing":["…"],"features":["…"],"topics":[{"topic":"…","count":1}],"level":"…","examples":[{"type":"block","text":"…","answer":"…"}]}
+
+BAUPLÄNE DER ALTKLAUSUREN:
+${exams.map(blueprintDigest).join('\n\n')}`;
+}
+function normalizeStyle(r, sources, subject, mismatches) {
   if (!r || typeof r !== 'object') throw { code: 'bad_shape' };
   const shares = {};
   let sum = 0;
-  for (const t of ['tf', 'single', 'multi', 'open']) { shares[t] = Math.max(0, Number(r.shares && r.shares[t]) || 0); sum += shares[t]; }
+  for (const t of QTYPES) { shares[t] = Math.max(0, Number(r.shares && r.shares[t]) || 0); sum += shares[t]; }
   if (!sum) { Object.keys(shares).forEach(t => { shares[t] = 25; }); sum = 100; }
   Object.keys(shares).forEach(t => { shares[t] = Math.round(shares[t] / sum * 100); });
   const num = (v, lo, hi) => { const n = Number(v); return v != null && Number.isFinite(n) && n >= lo && n <= hi ? Math.round(n) : null; };
@@ -2303,12 +2504,15 @@ function normalizeStyle(r, sources, subject) {
     options: num(r.options, 2, 8) || 5,
     correctPerQuestion: String(r.correctPerQuestion || '').trim().slice(0, 40),
     tfPenalty: r.tfPenalty === true,
-    mcScoring: r.mcScoring === 'partial' ? 'partial' : 'all',
+    mcScoring: ['statement', 'partial'].includes(r.mcScoring) ? r.mcScoring : 'all',
+    statements: r.statements && num(r.statements.min, 1, 10) ? { min: num(r.statements.min, 1, 10), max: num(r.statements.max, 1, 10) || num(r.statements.min, 1, 10) } : null,
+    rules: strs(r.rules, 12, 300),
+    topics: (Array.isArray(r.topics) ? r.topics : []).filter(x => x && x.topic).slice(0, 30).map(x => ({ topic: String(x.topic).trim().slice(0, 80), count: num(x.count, 1, 999) || 1 })),
     phrasing: strs(r.phrasing, 8, 220),
     features: strs(r.features, 8, 220),
     level: String(r.level || '').trim().slice(0, 300),
-    examples: (Array.isArray(r.examples) ? r.examples : []).filter(x => x && x.text).slice(0, 6).map(x => ({ type: QTYPE_LABEL[x.type] ? x.type : 'tf', text: String(x.text).trim().slice(0, 700), answer: String(x.answer == null ? '' : x.answer).trim().slice(0, 300) })),
-    mismatches: (Array.isArray(r.mismatches) ? r.mismatches : []).filter(x => x && x.file).slice(0, 20).map(x => ({ file: String(x.file).slice(0, 200), reason: String(x.reason || '').slice(0, 200) })),
+    examples: (Array.isArray(r.examples) ? r.examples : []).filter(x => x && x.text).slice(0, 6).map(x => ({ type: QTYPE_LABEL[x.type] ? x.type : 'tf', text: String(x.text).trim().slice(0, 900), answer: String(x.answer == null ? '' : x.answer).trim().slice(0, 300) })),
+    mismatches: (mismatches || (Array.isArray(r.mismatches) ? r.mismatches : [])).filter(x => x && x.file).slice(0, 20).map(x => ({ file: String(x.file).slice(0, 200), reason: String(x.reason || '').slice(0, 200) })),
     sources,
     subject,
     created: new Date().toISOString(),
@@ -2329,34 +2533,43 @@ async function analyzeExams() {
   if (!exams.length) { msg.textContent = `Lade zuerst mindestens eine Altklausur für „${subject}“ hoch.`; return; }
   if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }
   if (examBusy) return;
-  // Text up to about 150,000 characters, shared between the exams.
-  const budget = Math.floor(150000 / exams.length);
-  const text = exams.filter(e => e.text).map(e => `=== ${e.name} ===\n${e.text.length > budget ? e.text.slice(0, budget) + '\n[… gekürzt]' : e.text}`).join('\n\n');
-  // Scanned pages go to Claude as images, a few per exam in turn, up to the per-request limit.
-  const maxImg = Math.min(caps.imageMax || 0, 20);
-  const queue = exams.filter(e => e.scanned && e.scanned.length && (examDocs.has(e.id) || examImages.has(e.id)))
-    .map(e => ({ name: e.name, doc: examDocs.get(e.id), photos: examImages.get(e.id), pages: e.scanned.slice() }));
-  const picks = [];
-  while (picks.length < maxImg && queue.some(q => q.pages.length)) for (const q of queue) if (q.pages.length && picks.length < maxImg) picks.push({ name: q.name, doc: q.doc, photos: q.photos, num: q.pages.shift() });
-  const unreadable = exams.reduce((a, e) => a + (e.scanned ? e.scanned.length : 0), 0) - picks.length;
-  if (text.replace(/---[^\n]*---|===[^\n]*===|\s/g, '').length < 200 && !picks.length) {
-    msg.textContent = 'In den Altklausuren ist kein lesbarer Text. Lade gescannte PDFs in dieser Sitzung neu hoch, damit Claude die Seitenbilder lesen kann.';
+  // Exams without a blueprint, or with one made from text alone while their pages are now available as images.
+  const todo = exams.filter(e => !e.blueprint || (!e.blueprint.withImages && examLive(e)));
+  const unreadable = todo.filter(e => !examLive(e) && (e.text || '').replace(/---[^\n]*---|\s/g, '').length < 200);
+  if (unreadable.length === todo.length && todo.length && !exams.some(e => e.blueprint)) {
+    msg.textContent = 'In den Altklausuren ist kein lesbarer Text. Lade gescannte PDFs und Fotos in dieser Sitzung neu hoch, damit Claude die Seiten als Bilder liest.';
     return;
   }
   examBusy = true; btn.disabled = true;
-  msg.textContent = picks.length ? `Claude analysiert die Altklausuren (mit ${picks.length} Seitenbildern) …` : 'Claude analysiert die Altklausuren …';
+  const failed = [];
   try {
-    const images = [], labels = [];
-    for (const pk of picks) {
-      const b = pk.doc ? await drawPage(pk.doc, pk.num, 1100) : await shrinkJpeg(pk.photos[pk.num - 1], 1200);
-      if (b) { images.push(b); labels.push(pk.name); }
+    let done = 0;
+    const say = () => { msg.textContent = `Claude liest die Altklausuren Seite für Seite (${done}/${todo.length}) …`; };
+    if (todo.length) say();
+    const ctl = new AbortController();
+    await runPool(todo.filter(e => !unreadable.includes(e)).map(e => ({ e })), POOL, ctl.signal, async ({ e }) => {
+      try {
+        const images = await examPageImages(e);
+        const res = await askJSON(blueprintPrompt(e, subject, images.length), { tier: 'complex', effort: 'medium', images, signal: ctl.signal, maxTokens: 32000 });
+        e.blueprint = Object.assign(normalizeBlueprint(res), { withImages: images.length > 0, pagesSeen: images.length });
+        saveExams(); renderExamPanel();
+      } catch (err) { failed.push({ e, err }); if (err && FATAL.has(err.code)) ctl.abort(); }
+      done++; say();
+    });
+    const ready = exams.filter(e => e.blueprint);
+    if (!ready.length) throw failed.length ? failed[0].err : { code: 'bad_shape' };
+    const fits = ready.filter(e => e.blueprint.subjectOk);
+    const mismatches = ready.filter(e => !e.blueprint.subjectOk).map(e => ({ file: e.name, reason: e.blueprint.reason }));
+    if (!fits.length) {
+      msg.textContent = `Keine dieser Dateien gehört zu „${subject}“: ` + mismatches.map(m => `${m.file} (${m.reason || 'anderes Fach'})`).join('; ');
+      return;
     }
-    // Tell Claude which file each image comes from, so it can name exams from another subject.
-    const imageNote = labels.map((n, i) => `Bild ${i + 1}: ${n}`).join('; ');
-    const res = await askJSON(examStylePrompt(text, images.length, subject, imageNote), { tier: 'complex', effort: 'medium', images });
-    state.examStyles[subject] = normalizeStyle(res, exams.map(e => e.name), subject);
+    msg.textContent = 'Claude fasst den Klausurstil zusammen …';
+    const res = await askJSON(examStylePrompt(fits, subject), { tier: 'complex', effort: 'medium', signal: ctl.signal });
+    state.examStyles[subject] = normalizeStyle(res, fits.map(e => e.name), subject, mismatches);
     saveExams(); renderExamPanel();
-    msg.textContent = 'Klausurstil erkannt.' + (unreadable > 0 ? ` ${unreadable} gescannte Seiten wurden nicht gelesen (Datei in dieser Sitzung neu laden oder weniger Klausuren auf einmal).` : '');
+    const textOnly = fits.filter(e => !e.blueprint.withImages).length;
+    msg.textContent = 'Klausurstil erkannt.' + (failed.length ? ` ${failed.length} ${failed.length === 1 ? 'Klausur konnte' : 'Klausuren konnten'} nicht gelesen werden: ${errText(failed[0].err)}` : '') + (unreadable.length ? ` ${unreadable.length} ohne lesbaren Text übersprungen (in dieser Sitzung neu laden).` : '') + (textOnly ? ` ${textOnly} nur aus dem Text gelesen; neu laden, damit Claude auch Grafiken, Outputs und Lösungen sieht.` : '');
   } catch (e) {
     msg.className = 'hint msg err'; msg.textContent = errText(e);
   } finally { examBusy = false; btn.disabled = false; }
@@ -2380,7 +2593,12 @@ function renderExamPanel() {
         const live = examDocs.has(e.id) || examImages.has(e.id);
         const what = e.photos ? 'Fotos' : `${e.scanned.length} gescannte Seiten`;
         if (live) meta += e.photos ? ', Claude liest die Bilder' : ` · ${what}, Claude liest die Bilder`;
-        else { meta += ` · ${e.photos ? '' : what + ': '}Datei neu laden, damit Claude sie lesen kann`; cls += ' warn'; }
+        else if (!e.blueprint) { meta += ` · ${e.photos ? '' : what + ': '}Datei neu laden, damit Claude sie lesen kann`; cls += ' warn'; }
+      }
+      const b = e.blueprint;
+      if (b) {
+        meta += b.subjectOk ? ` · Bauplan: ${b.tasks.length} Aufgaben${b.withImages ? '' : ' (nur Text)'}` : ` · gehört nicht zu diesem Fach`;
+        if (b.subjectOk && !b.withImages && !examLive(e)) cls += ' warn';
       }
     }
     return el('li', { class: 'file' },
@@ -2399,7 +2617,14 @@ function renderExamPanel() {
   if (!st) { fill(box); return; }
   const shares = Object.entries(st.shares).filter(([, v]) => v > 0).map(([t, v]) => `${QTYPE_LABEL[t]} ${v} %`).join(' · ');
   const scope = [st.questionCount ? `${st.questionCount} Aufgaben` : null, st.durationMin ? `${st.durationMin} Minuten` : null, st.totalPoints ? `${st.totalPoints} Punkte` : null].filter(Boolean).join(' · ') || 'nicht angegeben';
-  const scoring = [`${st.options} Antwortoptionen${st.correctPerQuestion ? ', davon ' + st.correctPerQuestion + ' richtig' : ''}`, st.tfPenalty ? 'Punktabzug für falsche Antworten' : 'kein Punktabzug', st.mcScoring === 'partial' ? 'Teilpunkte' : 'alles oder nichts'].join(' · ');
+  const blocks = st.statements && st.shares.block > 0;
+  const scoring = [blocks ? `${st.statements.min}–${st.statements.max} Aussagen je Aufgabe${st.correctPerQuestion ? ', davon ' + st.correctPerQuestion + ' richtig' : ''}` : `${st.options} Antwortoptionen${st.correctPerQuestion ? ', davon ' + st.correctPerQuestion + ' richtig' : ''}`, st.tfPenalty ? 'Punktabzug für falsche Antworten' : 'kein Punktabzug', st.mcScoring === 'statement' ? 'jede Aussage zählt einzeln' : st.mcScoring === 'partial' ? 'Teilpunkte' : 'alles oder nichts'].join(' · ');
+  const bps = blueprintExams(subject);
+  const tplVal = bps.some(e => e.id === store.get('mockTemplate', 'mix')) ? store.get('mockTemplate', 'mix') : 'mix';
+  const tplSelect = bps.length ? el('label', {}, el('span', { class: 'lbl', text: 'Vorlage für die Probeklausur' }),
+    el('select', { id: 'mock-template', onchange: e => { store.set('mockTemplate', e.target.value); renderExamPanel(); } },
+      el('option', { value: 'mix', selected: tplVal === 'mix' || null, text: `Mix aus allen Altklausuren (${bps.length})` }),
+      ...bps.map(e => el('option', { value: e.id, selected: tplVal === e.id || null, text: `${e.name} · ${e.blueprint.tasks.length} Aufgaben` })))) : null;
   const item = (dt, dd) => el('div', {}, el('dt', { text: dt }), el('dd', { text: dd }));
   fill(box,
     el('h3', { text: `Erkannter Klausurstil: ${subject}` }),
@@ -2408,8 +2633,12 @@ function renderExamPanel() {
     el('dl', { class: 'profile-grid' }, item('Aufgabentypen', shares), item('Umfang', scope), item('Bewertung', scoring), item('Niveau', st.level || '–')),
     st.phrasing.length ? el('div', {}, el('span', { class: 'lbl', text: 'Typische Formulierungen' }), el('ul', {}, ...st.phrasing.map(x => el('li', { text: '„' + x + '“' })))) : null,
     st.features.length ? el('div', {}, el('span', { class: 'lbl', text: 'Besonderheiten' }), el('ul', {}, ...st.features.map(x => el('li', { text: x })))) : null,
+    st.topics && st.topics.length ? el('div', {}, el('span', { class: 'lbl', text: 'Geprüfte Themen' }), el('p', { text: st.topics.map(t => t.count > 1 ? `${t.topic} (${t.count}×)` : t.topic).join(' · ') })) : null,
+    bps.length ? el('details', { class: 'method' }, el('summary', { text: `Bauplan je Altklausur (${bps.length})` }),
+      ...bps.map(e => el('div', {}, el('b', { text: e.name }), el('ol', {}, ...e.blueprint.tasks.map(t => el('li', { text: `${t.topic} – ${t.kind || QTYPE_LABEL[t.type]}${t.items.length ? `, ${t.items.length} Aussagen (richtig: ${t.items.map((x, i) => x.correct === true ? String.fromCharCode(97 + i) : null).filter(Boolean).join(', ') || (t.items.some(x => x.correct === null) ? '?' : 'keine')})` : ''}` }))))) ) : null,
     st.examples.length ? el('details', { class: 'method' }, el('summary', { text: `Beispielaufgaben aus den Altklausuren (${st.examples.length})` }), el('ul', {}, ...st.examples.map(x => el('li', { text: `[${QTYPE_LABEL[x.type]}] ${x.text}${x.answer ? ' → ' + x.answer : ''}` })))) : null,
     el('p', { class: 'hint', text: 'Erkannt aus: ' + st.sources.join(', ') }),
+    tplSelect,
     el('div', { class: 'actions' },
       el('button', { type: 'button', id: 'mock-exam', class: 'btn primary', onclick: startMockExam }, 'Probeklausur erstellen'),
       el('span', { class: 'hint', text: mockExamHint(st) }),

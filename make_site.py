@@ -360,7 +360,7 @@ body = replace(body, """  const img = $('#opt-images');
   img.disabled = !anyPdf;
   if (img.disabled) img.checked = false;
   $('#opt-images-hint').textContent = anyPdf ? 'Liest auch Diagramme, Abbildungen und gescannte Folien. Langsamer und etwas teurer.' : 'Nur für PDFs, die in dieser Sitzung geladen wurden.';""")
-body = replace(body, "  if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }", "  if (!hasKey()) { msg.textContent = errText({ code: 'no_key' }); focusKey(); return; }", 5)
+body = replace(body, "  if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }", "  if (!hasKey()) { msg.textContent = errText({ code: 'no_key' }); focusKey(); return; }", 6)
 body = replace(body, "  if (!caps.sample) { $('#gen-cards-msg').textContent = errText({ code: 'unavailable' }); return; }", "  if (!hasKey()) { $('#gen-cards-msg').textContent = errText({ code: 'no_key' }); focusKey(); return; }")
 
 # cost after each run
