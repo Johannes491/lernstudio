@@ -651,8 +651,24 @@ function saveCards() { store.set('cards', state.cards); }
 function saveQuiz() { if (state.quiz) store.set('quiz', state.quiz); else store.del('quiz'); }
 
 /* ---------- Material import ---------- */
+// Math letters from formula fonts (𝑋, 𝜏, 𝑷𝒆𝒓𝒔𝒐𝒏) become plain letters, so Claude reads "X iPerson" instead of rare symbols.
+const plainMath = s => String(s).replace(/[\u{1D400}-\u{1D7FF}]/gu, c => c.normalize('NFKC'));
+// Slides whose text layer cannot be trusted: formulas that lost their structure (Σ, ∫ and bars arrive as letters
+// from other scripts such as ෍ or ҧ; a line of math letters and operators lost its brackets, fractions or exponents),
+// or font encodings that turn words into letter salad (":LHGHUNHKUHQGH" for "Wiederkehrende").
+function textCheck(raw) {
+  if (/[\u0D80-\u0DFF\u04A7√∑∫]/.test(raw)) return 'formula';
+  const mathLine = raw.split('\n').some(l => {
+    const t = [...l.replace(/\s/g, '')];
+    const m = t.filter(c => /[\u{1D400}-\u{1D7FF}]/u.test(c)).length;
+    return m >= 3 && m / t.length >= 0.5 && /[=+−∙·]/.test(l);
+  });
+  if (mathLine) return 'formula';
+  const salad = (raw.match(/[A-Z]{2,}[a-z]?[A-Z]{3,}/g) || []).some(w => w.length > 6 || /[a-z]/.test(w));
+  return salad || (raw.match(/\uFFFD/g) || []).length >= 3 ? 'garbled' : '';
+}
 function cleanText(s) {
-  return String(s).replace(/\u00a0/g, ' ').replace(/[ \t\f\v]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return plainMath(s).replace(/[\uE000-\uF8FF]/g, '•').replace(/\u00a0/g, ' ').replace(/[ \t\f\v]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 function splitText(text, base) {
   const paras = cleanText(text).split(/\n{2,}/);
@@ -678,7 +694,8 @@ async function readPdf(file) {
     const tc = await page.getTextContent();
     let t = '';
     for (const it of tc.items) { if (typeof it.str !== 'string') continue; t += it.str + (it.hasEOL ? '\n' : ' '); }
-    units.push({ kind: 'Folie', num: i, label: 'Folie ' + i, text: cleanText(t) });
+    const check = textCheck(t);
+    units.push(Object.assign({ kind: 'Folie', num: i, label: 'Folie ' + i, text: cleanText(t) }, check ? { check } : {}));
     page.cleanup();
   }
   return { doc, units };
@@ -809,7 +826,10 @@ function renderFiles() {
     else {
       const unit = f.ext === 'pdf' || f.ext === 'pptx' ? (f.count === 1 ? 'Folie' : 'Folien') : (f.count === 1 ? 'Abschnitt' : 'Abschnitte');
       meta = `${f.count} ${unit} · ${Math.round(f.chars / 100) / 10}k Zeichen`;
+      const checks = state.units.filter(u => u.fileId === f.id && u.check).length;
       if (f.ext === 'pdf' && f.empty > f.count / 2) { meta += ' · kaum Text: Folienbilder mitsenden'; cls += ' warn'; }
+      else if (checks && (pdfDocs.has(f.id) || f.live)) meta += ` · ${checks} ${checks === 1 ? 'Folie' : 'Folien'} mit Formeln oder unlesbarem Text gehen als Bild an Claude`;
+      else if (checks) { meta += ` · ${checks} ${checks === 1 ? 'Folie' : 'Folien'} mit Formeln oder unlesbarem Text: Datei neu laden, damit Claude sie als Bild bekommt`; cls += ' warn'; }
       else if (f.ext === 'pdf' && !f.live && !pdfDocs.has(f.id)) meta += ' · Bilder erst nach erneutem Laden';
     }
     return el('li', { class: 'file' },
@@ -964,6 +984,8 @@ const COVER_RULES = `INHALTE, DIE ABGEDECKT WERDEN MÜSSEN (soweit im Material v
 - Zahlen, Häufigkeiten, Kriterien (z. B. Diagnosekriterien, Prävalenzen), Formeln und ihre Interpretation
 - Klassifikationen, Taxonomien und die Beispiele, die die Vorlesung nennt
 - Alles, was als wichtig markiert ist („Merke“, „Zusammenfassung“, „klausurrelevant“, Hervorhebungen, Sprechernotizen)
+- Wiederholungs-, Quiz- und Diskussionsfragen auf den Folien: als Karte übernehmen, wenn die Lösung eindeutig aus dem Material oder aus dem gesicherten Grundwissen der Vorlesung folgt; Wahr/Falsch-Aussagen als „Richtig oder falsch? „…““ mit Lösung und kurzer Begründung. Ist die Lösung nicht eindeutig, die Frage weglassen.
+- Folien „zur eigenen Lektüre“ gehören zum Stoff, soweit ihr Inhalt lesbar ist.
 Keine Karten zu Titel-, Gliederungs-, Literatur- oder Organisationsfolien ohne Fachinhalt.`;
 const STYLE_EXAMPLES = `BEISPIELE (nur für Form und Stil, nicht für den Inhalt):
 {"type":"basic","front":"Welche Methoden der Reliabilitätsschätzung gibt es? (4)","back":"<ul><li><b>Retest-Reliabilität</b>: derselbe Test zu zwei Zeitpunkten → Stabilität</li><li><b>Paralleltest-Reliabilität</b>: zwei äquivalente Testformen</li><li><b>Testhalbierung</b> (Split-Half): Korrelation zweier Testhälften</li><li><b>Interne Konsistenz</b>: z. B. Cronbachs α</li></ul>","slide":14,"topic":"Reliabilität"}
@@ -1007,13 +1029,14 @@ ${typeRules(o)}
 ${formulaRules(o)}${COVER_RULES}
 
 REGELN:
-- Nutze nur Inhalte aus dem Material. Erfinde keine Fakten, Studien, Jahreszahlen oder Zahlen. Enthält eine Folie nur Stichworte, bleib nah an diesen Stichworten.
+- Nutze nur Inhalte aus dem Material. Erfinde keine Fakten, Studien, Jahreszahlen oder Zahlen. Enthält eine Folie nur Stichworte, bleib nah an diesen Stichworten. Einzige Ausnahme: die Lösung von Wiederholungs- und Quizfragen (siehe oben).
+- Ausgelesener Folientext ist bei Formeln oft unvollständig: Klammern, Brüche, Wurzeln, Exponenten und Summenzeichen fehlen (z. B. „VAR X = E X − E X 2“ statt VAR(X) = E((X − E(X))<sup>2</sup>)). Bei manchen PDFs ist er Zeichensalat. Rekonstruiere Formeln in der üblichen Notation des Fachs und prüfe sie an den Rechenbeispielen der Folien. Wo ein Folienbild beiliegt, ist es maßgeblich. Unlesbare Stellen ohne Bild lässt du weg, statt zu raten.
 - "slide": die Nummer N aus der Überschrift „=== Datei · Folie N ===“ (bzw. Seite/Abschnitt N), aus der die Karte stammt.
 - "topic": Unterthema in 1–4 Wörtern; für alle Karten zum selben Thema gleich geschrieben.
 - Reihenfolge der Karten = Reihenfolge im Material.
 - Sprache: ${langRule(o)}
 - Umfang: ${densityRule(o)}
-${withImages ? '- Zu jeder Folie ist ein Bild angehängt, in derselben Reihenfolge wie die Folien im Material. Nutze die Bilder für Diagramme, Abbildungen, Tabellen und Text, der im extrahierten Folientext fehlt.\n' : ''}
+${Array.isArray(withImages) ? `- Zu ${withImages.length === 1 ? 'Folie' : 'den Folien'} ${withImages.join(', ')} ist je ein Bild angehängt (in dieser Reihenfolge), weil der ausgelesene Text dort Formeln oder unlesbare Zeichen enthält. Maßgeblich ist das Bild.\n` : withImages ? '- Zu jeder Folie ist ein Bild angehängt, in derselben Reihenfolge wie die Folien im Material. Nutze die Bilder für Diagramme, Abbildungen, Tabellen und Text, der im extrahierten Folientext fehlt.\n' : ''}
 ANFORDERUNGEN DES NUTZERS (haben Vorrang vor den Stilregeln):
 ${o.req || '(keine)'}
 
@@ -1181,6 +1204,13 @@ async function chunkImages(chunk) {
   const blobs = await Promise.all(chunk.units.map(u => claudeSlide(u.fileId, u.num)));
   return blobs.every(Boolean) ? blobs : null;
 }
+// Without "Folienbilder mitsenden", Claude still gets the slides whose text cannot be trusted (formulas, letter salad).
+async function checkImages(chunk) {
+  const pick = chunk.units.filter(u => u.check && pdfDocs.has(u.fileId)).slice(0, caps.imageMax || 0);
+  const blobs = await Promise.all(pick.map(u => claudeSlide(u.fileId, u.num)));
+  const ok = pick.map((u, i) => [u.num, blobs[i]]).filter(([, b]) => b);
+  return ok.length ? { images: ok.map(([, b]) => b), nums: ok.map(([n]) => n) } : null;
+}
 // Streaming adds cards several times a second; the deck view redraws at most every 300 ms.
 let deckTimer = 0;
 function scheduleDeckRender() {
@@ -1192,8 +1222,9 @@ async function runCardJob(job, total, o) {
   state.cards = state.cards.filter(c => c.job !== job.key);
   paintCardProgress(); scheduleDeckRender();
   try {
-    const images = o.images ? await chunkImages(job.chunk) : null;
-    const res = await streamItems(cardPrompt(job.chunk, job.idx, total, o, !!images), {
+    const some = o.images ? null : await checkImages(job.chunk);
+    const images = o.images ? await chunkImages(job.chunk) : some && some.images;
+    const res = await streamItems(cardPrompt(job.chunk, job.idx, total, o, o.images ? !!images : some ? some.nums : false), {
       tier: o.tier, effort: EFFORT.cards, signal: cardCtl.signal, images,
       onItem: r => {
         const c = normalizeCards([r], job.chunk, o, false)[0];

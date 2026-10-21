@@ -3,7 +3,7 @@
 ## Phase 1: Qualität absichern
 | Was | Stand |
 |---|---|
-| Praxistest mit 2–3 echten Vorlesungen, Regeln nach Feedback nachschärfen | offen (braucht echte Durchläufe) |
+| Praxistest mit 2–3 echten Vorlesungen, Regeln nachschärfen | erledigt: Diagnostik 1 VL 2 als komplettes Deck, Differentielle und Entwicklungspsychologie als Stichprobe; neue Regeln für Formeln, unlesbaren PDF-Text und Wiederholungsfragen. Weiter nachschärfen nach Feedback aus der eigenen Nutzung |
 | Quiz und Probeklausur im Stil der Altklausuren (auch gescannt oder als Foto, Zeitlimit, Punktabzug), ein Klausurstil pro Fach | erledigt |
 | Formel-Modus: jede Formel als Karte plus Rechenbeispiel | erledigt |
 | Hinweis auf der Website auf die claude.ai-Version | erledigt |
