@@ -303,6 +303,18 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
           <label class="choice"><input type="checkbox" id="opt-images"><span>Folienbilder an Claude mitsenden<small id="opt-images-hint">Liest auch Diagramme, Abbildungen und gescannte Folien. Nur bei PDF.</small></span></label>
           <label class="choice"><input type="checkbox" id="opt-coverage" checked><span>Abdeckung prüfen und Lücken füllen<small>Ein zweiter Durchgang vergleicht Folie für Folie mit den Karten und ergänzt Fehlendes.</small></span></label>
           <label class="choice"><input type="checkbox" id="opt-formula" checked><span>Formeln und Rechenwege<small>Jede Formel als eigene Karte, dazu Rechenbeispiele mit Lösungsweg.</small></span></label>
+          <details id="lib-box" class="method">
+            <summary>Meine Anki-Decks: Stil und Dubletten <span id="lib-count" class="hint"></span></summary>
+            <p class="hint">Lade deine vorhandenen Decks als .apkg (in Anki: Datei → Exportieren). Claude übernimmt ihren Stil, und neue Karten, die es dort schon gibt, werden markiert. Die Decks bleiben in diesem Browser.</p>
+            <label class="drop" id="lib-drop">
+              <input type="file" id="lib-input" multiple accept=".apkg,.colpkg">
+              <span class="drop-title">Anki-Decks hierher ziehen oder auswählen</span>
+              <span class="drop-hint">.apkg oder .colpkg, auch mehrere auf einmal</span>
+            </label>
+            <ul id="lib-list" class="file-list"></ul>
+            <label class="choice"><input type="checkbox" id="opt-libstyle"><span>Stil meiner Decks übernehmen<small id="opt-libstyle-hint">Beispiele und Kennzahlen aus deinen Decks, bevorzugt aus dem gleichen Kurs. Ohne diese Option gilt der Lernstudio-Stil.</small></span></label>
+            <label class="choice"><input type="checkbox" id="opt-libdupes" checked><span>Karten markieren, die es schon gibt<small>Vergleicht jede neue Frage mit deinen Decks und mit früheren Exporten aus dem Lernstudio.</small></span></label>
+          </details>
           <label><span class="lbl">Deine Anforderungen an die Karten</span>
             <textarea id="card-req" rows="4" placeholder="z. B. Bei Studien immer Autor, Jahr, Methode und Befund abfragen. Englische Fachbegriffe in Klammern ergänzen. Folien 1–3 auslassen."></textarea>
           </label>
@@ -336,6 +348,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
               <button type="button" id="add-card" class="btn small">Karte hinzufügen</button>
               <button type="button" id="run-coverage" class="btn small">Lücken suchen</button>
               <button type="button" id="drop-dupes" class="btn small" hidden>Dubletten entfernen</button>
+              <button type="button" id="drop-known" class="btn small" hidden>Schon vorhandene entfernen</button>
             </div>
             <p id="filter-note" class="filter-note" hidden></p>
             <div id="card-list" class="card-list"></div>
@@ -345,12 +358,16 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
                 <label><span class="lbl">Deckname in Anki</span><input type="text" id="deck-name" autocomplete="off"></label>
                 <label class="choice" style="align-self:end"><input type="checkbox" id="opt-slideimg"><span>Folienbild auf der Rückseite<small id="opt-slideimg-hint">Wie in deinem Deck zur Persönlichkeitspsychologie. Nur für PDFs, die in dieser Sitzung geladen wurden.</small></span></label>
               </div>
+              <label class="choice" id="only-new-row" hidden><input type="checkbox" id="opt-onlynew"><span id="only-new-label">Nur neue Karten exportieren</span></label>
               <div class="actions">
                 <button type="button" id="export-apkg" class="btn primary">Anki-Datei speichern</button>
+                <button type="button" id="send-anki" class="btn" hidden>Direkt an Anki senden</button>
                 <button type="button" id="clear-deck" class="btn small ghost">Deck verwerfen</button>
               </div>
               <p class="hint">Du bekommst eine .zip mit der .apkg-Datei darin. Entpacke sie per Doppelklick und öffne dann die .apkg. Anki importiert das Deck mit Unterdeck, Schlagwörtern und Folienangabe.</p>
+              <p id="send-anki-hint" class="hint" hidden>„Direkt an Anki senden“: Anki muss geöffnet sein, mit dem Add-on AnkiConnect (Code 2055492159). Beim ersten Mal fragt Anki, ob diese Website zugreifen darf. Karten, die es im Deck schon gibt, werden übersprungen.</p>
               <p id="export-msg" class="msg" role="status"></p>
+              <div id="export-history" hidden></div>
             </div>
           </div>
         </div>
@@ -457,6 +474,8 @@ const CDN = {
   pdf: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   pdfWorker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
   sql: 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-asm.js',
+  // Anki 2.1.50+ stores the collection zstd-compressed (collection.anki21b).
+  zstd: 'https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.js',
 };
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -636,6 +655,8 @@ const state = {
   quiz: store.get('quiz', null),
   exams: store.get('exams', []),
   examStyles: store.get('examStyles', null) || {},
+  library: store.get('library', []),
+  exportHistory: store.get('exportHistory', []),
 };
 {
   const old = store.get('examStyle', null);
@@ -1040,13 +1061,208 @@ ${Array.isArray(withImages) ? `- Zu ${withImages.length === 1 ? 'Folie' : 'den F
 ANFORDERUNGEN DES NUTZERS (haben Vorrang vor den Stilregeln):
 ${o.req || '(keine)'}
 
-${STYLE_EXAMPLES}
+${libraryStyleBlock(o) || STYLE_EXAMPLES}
 
 AUSGABE: Eine Karte pro Zeile als eigenständiges JSON-Objekt (JSON Lines), ohne umschließendes Array, ohne Codeblock, ohne weiteren Text und ohne Zeilenumbruch innerhalb einer Karte:
 {"type":"basic","front":"…","back":"<ul><li>…</li></ul>","slide":12,"topic":"…"}
 
 MATERIAL:
 ${materialBlock(chunk.units)}`;
+}
+/* ---------- Eigene Anki-Decks: Stil und Dubletten ---------- */
+const STOPWORDS = new Set('der die das den dem des ein eine einer eines einem einen und oder ist sind was wie wer wo welche welcher welches wird werden wurde zu zum zur von vom im in mit auf für bei als aus nach über unter nenne nennen erkläre erläutere beschreibe gibt es man sich nicht auch the a an of and or to is are what how which who why does do name describe explain'.split(' '));
+// Questions compared as plain words: no HTML or cloze markup, no counts like "(4)", no punctuation.
+function normFront(html) {
+  const t = stripHtml(String(html || '').replace(/\{\{c\d+::(.*?)(::[^}]*)?\}\}/g, '$1'));
+  return t.toLowerCase().replace(/\(\d+\)\s*\??\s*$/, '').replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+// Numbers count too: "Folgerung 4" and "Folgerung 5" are different questions.
+const tokensOf = n => new Set(n.split(' ').filter(w => (w.length > 2 || /\d/.test(w)) && !STOPWORDS.has(w)));
+function medianOf(a) { const b = a.slice().sort((x, y) => x - y); return b.length ? b[Math.floor(b.length / 2)] : 0; }
+async function readAnkiDeck(file) {
+  await loadScript(CDN.jszip);
+  const zip = await window.JSZip.loadAsync(file);
+  const z21b = zip.file('collection.anki21b'), zOld = zip.file('collection.anki21') || zip.file('collection.anki2');
+  let bytes;
+  if (z21b) {
+    await loadScript(CDN.zstd);
+    if (!window.fzstd) throw new Error('Der Entpacker für neue Anki-Dateien konnte nicht geladen werden.');
+    bytes = window.fzstd.decompress(await z21b.async('uint8array'));
+  } else if (zOld) bytes = await zOld.async('uint8array');
+  else throw new Error('Das ist keine Anki-Datei. Exportiere das Deck in Anki als .apkg.');
+  await loadScript(CDN.sql);
+  if (typeof window.initSqlJs !== 'function') throw new Error('Die Datenbank-Bibliothek konnte nicht geladen werden.');
+  const db = new (await window.initSqlJs()).Database(bytes);
+  try {
+    const rows = sql => { const r = db.exec(sql); return r.length ? r[0].values : []; };
+    const tables = new Set(rows("SELECT name FROM sqlite_master WHERE type = 'table'").map(r => r[0]));
+    const types = new Map(), decks = new Map();
+    if (tables.has('notetypes')) {
+      rows('SELECT id, name FROM notetypes').forEach(([id, name]) => types.set(String(id), { name: String(name), fields: [] }));
+      rows('SELECT ntid, ord, name FROM fields').forEach(([ntid, ord, name]) => { const t = types.get(String(ntid)); if (t) t.fields[ord] = String(name); });
+      rows('SELECT id, name FROM decks').forEach(([id, name]) => decks.set(String(id), String(name).split('\x1f').join('::')));
+    } else {
+      const [models, dks] = rows('SELECT models, decks FROM col')[0] || [];
+      Object.entries(JSON.parse(models || '{}')).forEach(([id, m]) => types.set(String(id), { name: String(m.name), fields: (m.flds || []).map(f => f.name), cloze: m.type === 1 }));
+      Object.entries(JSON.parse(dks || '{}')).forEach(([id, d]) => decks.set(String(id), String(d.name)));
+    }
+    const deckOf = new Map(rows('SELECT nid, MIN(did) FROM cards GROUP BY nid').map(([nid, did]) => [String(nid), decks.get(String(did)) || '']));
+    const kindOf = t => !t ? 'basic' : /occlusion|bildverdeckung/i.test(t.name) ? 'skip' : t.cloze || /cloze|lückentext/i.test(t.name) || t.fields[0] === 'Text' ? 'cloze' : /umgekehrt|reverse/i.test(t.name) ? 'reverse' : 'basic';
+    const fronts = [], pool = [], st = { f: [], b: [], list: 0, bold: 0, count: 0, enumq: 0, cloze: 0, reverse: 0 };
+    const topDecks = new Map();
+    for (const [id, mid, flds] of rows('SELECT id, mid, flds FROM notes')) {
+      const kind = kindOf(types.get(String(mid)));
+      if (kind === 'skip') continue;
+      const [front = '', back = ''] = String(flds).split('\x1f');
+      const n = normFront(front);
+      if (!n) continue;
+      const deck = deckOf.get(String(id)) || '';
+      const top = deck.split('::')[0];
+      if (top && top !== 'Default') topDecks.set(top, (topDecks.get(top) || 0) + 1);
+      fronts.push({ n, f: stripHtml(front.replace(/\{\{c\d+::(.*?)(::[^}]*)?\}\}/g, '$1')).slice(0, 120), d: deck });
+      const ft = stripHtml(front), bt = stripHtml(back);
+      st.f.push(ft.length); if (kind !== 'cloze') st.b.push(bt.length);
+      if (/<(ul|ol)\b/i.test(back)) st.list++;
+      if (/<(b|strong)\b/i.test(back + front)) st.bold++;
+      if (/(nenne|welche|was sind|list|name)/i.test(ft)) { st.enumq++; if (/\(\d+\)\s*\??\s*$/.test(ft)) st.count++; }
+      if (kind === 'cloze') st.cloze++; if (kind === 'reverse') st.reverse++;
+      // Style examples: whole cards with text only, of everyday length.
+      if (!/<img|\[sound:/i.test(front + back) && ft.length >= 8 && ft.length <= 160 && (kind === 'cloze' || (bt.length >= 20 && bt.length <= 700)))
+        pool.push({ type: kind, front: cleanAnkiHtml(front), back: kind === 'cloze' ? cleanAnkiHtml(back).slice(0, 300) : cleanAnkiHtml(back) });
+    }
+    if (!fronts.length) throw new Error('In dieser Datei wurden keine Karten mit Text gefunden.');
+    const deck = Array.from(topDecks.entries()).sort((a, b) => b[1] - a[1])[0];
+    const examples = pool.map(x => [hash53(x.front), x]).sort((a, b) => a[0] - b[0]).slice(0, 24).map(([, x]) => x);
+    const notes = fronts.length;
+    return { deck: deck ? deck[0] : file.name.replace(/\.(apkg|colpkg)$/i, ''), notes, fronts, examples,
+      stats: { front: medianOf(st.f), back: medianOf(st.b), list: st.b.length ? st.list / st.b.length : 0, bold: st.bold / notes, count: st.enumq ? st.count / st.enumq : 0, cloze: st.cloze / notes, reverse: st.reverse / notes } };
+  } finally { db.close(); }
+}
+function cleanAnkiHtml(html) {
+  return sanitize(String(html).replace(/&nbsp;|\u00a0/g, ' ').replace(/<\/div>\s*<div>/gi, '<br>').replace(/<\/?div[^>]*>/gi, ''))
+    .replace(/(<br>\s*){2,}/g, '<br>').replace(/<br>\s*(<\/?(ul|ol|li)>)/g, '$1').replace(/(<\/?(ul|ol)>)\s*<br>/g, '$1').replace(/\s{2,}/g, ' ').replace(/^(<br>|\s)+|(<br>|\s)+$/g, '');
+}
+function saveLibrary() {
+  if (store.set('library', state.library)) return;
+  // Storage full: keep fewer style examples per deck.
+  if (!store.set('library', state.library.map(d => Object.assign({}, d, { examples: d.examples.slice(0, 8) })))) store.set('library', state.library.map(d => Object.assign({}, d, { examples: [] })));
+}
+async function addLibraryFiles(list) {
+  for (const file of Array.from(list)) {
+    const entry = { id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), file: file.name, status: 'lädt' };
+    state.library.push(entry); renderLibrary();
+    try {
+      Object.assign(entry, await readAnkiDeck(file), { status: 'ok', added: new Date().toISOString() });
+      // The same deck loaded again replaces the older copy.
+      state.library = state.library.filter(d => d === entry || d.deck !== entry.deck);
+    } catch (err) {
+      entry.status = 'error'; entry.error = (err && err.message) || 'Die Datei konnte nicht gelesen werden.';
+    }
+    knownChanged(); saveLibrary(); renderLibrary(); renderDeck(true);
+  }
+}
+function renderLibrary() {
+  const ok = state.library.filter(d => d.status === 'ok');
+  $('#lib-count').textContent = ok.length ? `(${ok.length} ${ok.length === 1 ? 'Deck' : 'Decks'}, ${ok.reduce((a, d) => a + d.notes, 0).toLocaleString('de-DE')} Karten)` : '';
+  fill($('#lib-list'), ...state.library.map(d => el('li', { class: 'file' },
+    el('span', { class: 'file-name', text: d.deck || d.file }),
+    el('span', { class: 'file-meta' + (d.status === 'error' ? ' err' : ''), text: d.status === 'lädt' ? 'wird gelesen …' : d.status === 'error' ? d.error : `${d.notes} Karten · Vorderseite ~${d.stats.front} Zeichen, Rückseite ~${d.stats.back} Zeichen · ${Math.round(d.stats.list * 100)} % Listen` }),
+    d.status === 'lädt' ? null : el('button', { type: 'button', class: 'btn small ghost', 'aria-label': (d.deck || d.file) + ' entfernen', onclick: () => { state.library = state.library.filter(x => x !== d); knownChanged(); saveLibrary(); renderLibrary(); renderDeck(true); } }, 'Entfernen'))));
+  $('#opt-libstyle').disabled = !ok.length;
+}
+// Decks of the same course first (by words of the course name), else all decks.
+function styleDecks() {
+  const ok = state.library.filter(d => d.status === 'ok');
+  const words = ($('#course').value || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length > 3);
+  const score = d => words.filter(w => d.deck.toLowerCase().includes(w)).length;
+  const best = Math.max(0, ...ok.map(score));
+  return best ? ok.filter(d => score(d) === best) : ok;
+}
+function libraryStyleBlock(o) {
+  if (!o.libStyle) return '';
+  const decks = styleDecks();
+  if (!decks.length) return '';
+  const n = decks.reduce((a, d) => a + d.notes, 0);
+  const avg = k => decks.reduce((a, d) => a + d.stats[k] * d.notes, 0) / n;
+  const pct = k => Math.round(avg(k) * 100) + ' %';
+  // A fixed, varied pick: lists, a cloze and a reverse card where the decks have them.
+  const pool = decks.flatMap(d => d.examples);
+  const pick = [...pool.filter(x => x.type === 'basic' && /<(ul|ol)/i.test(x.back)).slice(0, 4), ...pool.filter(x => x.type === 'basic' && !/<(ul|ol)/i.test(x.back)).slice(0, 1), ...pool.filter(x => x.type === 'cloze').slice(0, 1), ...pool.filter(x => x.type === 'reverse').slice(0, 1)].slice(0, 7);
+  if (!pick.length) return '';
+  return `STIL DEINER EIGENEN DECKS (${n.toLocaleString('de-DE')} Karten aus ${decks.length === 1 ? 'dem Deck „' + decks[0].deck + '“' : decks.length + ' Decks'}; hat Vorrang vor den allgemeinen Stilregeln oben):
+- Vorderseite im Median ${Math.round(avg('front'))} Zeichen, Rückseite ${Math.round(avg('back'))} Zeichen.
+- ${pct('list')} der Rückseiten sind Listen, ${pct('bold')} der Karten enthalten Fettdruck, ${pct('count')} der Aufzählungsfragen nennen die Anzahl in Klammern.
+- Anteil Lückentexte ${pct('cloze')}, Umkehrkarten ${pct('reverse')}.
+
+BEISPIELE AUS DEINEN DECKS (Form, Länge und Ton übernehmen, nicht den Inhalt):
+${pick.map(x => JSON.stringify({ type: x.type, front: x.front, back: x.back })).join('\n')}`;
+}
+// Index over the questions of the user's decks and of earlier Lernstudio exports; rebuilt when they change.
+let knownIx = null, knownVer = Date.now(); // unique per page load, so marks saved with the cards are checked again
+function knownChanged() { knownIx = null; knownVer++; }
+function knownIndex() {
+  if (knownIx) return knownIx;
+  const entries = [];
+  state.library.filter(d => d.status === 'ok').forEach(d => d.fronts.forEach(x => entries.push({ n: x.n, f: x.f, src: 'Deck „' + (x.d || d.deck) + '“' })));
+  state.exportHistory.forEach(h => (h.fronts || []).forEach((n, i) => entries.push({ n, f: (h.labels || [])[i] || n, src: `Lernstudio-Export „${h.deck}“ vom ${h.date}`, guid: h.guids[i] })));
+  const byNorm = new Map(), byTok = new Map();
+  entries.forEach((e, i) => {
+    e.t = tokensOf(e.n);
+    if (!byNorm.has(e.n)) byNorm.set(e.n, []);
+    byNorm.get(e.n).push(e);
+    e.t.forEach(w => { if (!byTok.has(w)) byTok.set(w, []); byTok.get(w).push(i); });
+  });
+  knownIx = { entries, byNorm, byTok, exported: new Set(state.exportHistory.flatMap(h => h.guids)) };
+  return knownIx;
+}
+// A question counts as known when it matches exactly, or when at least 75 % of its content words match.
+function findKnown(c, current) {
+  const ix = knownIndex(), n = normFront(c.front);
+  if (!n) return null;
+  // Exported cards that are still in this deck are not "already there" for each other.
+  const own = e => e.guid && current.has(e.guid);
+  const exact = (ix.byNorm.get(n) || []).find(e => !own(e));
+  if (exact) return exact;
+  const t = tokensOf(n);
+  if (t.size < 2) return null;
+  const shared = new Map();
+  t.forEach(w => (ix.byTok.get(w) || []).forEach(i => shared.set(i, (shared.get(i) || 0) + 1)));
+  let best = null, score = 0;
+  shared.forEach((k, i) => { const e = ix.entries[i]; if (e.t.size < 2 || own(e)) return; const j = k / (t.size + e.t.size - k); if (j > score) { score = j; best = e; } });
+  return score >= 0.75 ? best : null;
+}
+function markKnown() {
+  const on = $('#opt-libdupes').checked;
+  const current = new Set(state.cards.map(c => c.guid));
+  for (const c of state.cards) {
+    if (c.kv === knownVer) continue;
+    c.kv = knownVer;
+    const k = on ? findKnown(c, current) : null;
+    if (k) c.known = { src: k.src, f: k.f, exp: !!k.guid }; else delete c.known;
+  }
+}
+// After an export: remember which cards went out, per deck, for "only new cards" and the duplicate check.
+function recordExport(deckName, cards) {
+  const d = new Date();
+  state.exportHistory.push({ deck: deckName, course: $('#course').value.trim(), date: `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`, at: d.toISOString(), count: cards.length,
+    guids: cards.map(c => c.guid), fronts: cards.map(c => normFront(c.front)), labels: cards.map(c => stripHtml(c.front).slice(0, 120)) });
+  while (state.exportHistory.length > 60) state.exportHistory.shift();
+  if (!store.set('exportHistory', state.exportHistory)) { state.exportHistory = state.exportHistory.slice(-15); store.set('exportHistory', state.exportHistory); }
+  knownChanged();
+}
+function renderExportHistory() {
+  const deckName = $('#deck-name').value.trim() || defaultDeckName();
+  const exported = new Set(state.exportHistory.filter(h => h.deck === deckName).flatMap(h => h.guids));
+  const fresh = state.cards.filter(c => !c.draft && !exported.has(c.guid)).length;
+  const row = $('#only-new-row');
+  row.hidden = !exported.size;
+  if (exported.size) $('#only-new-label').textContent = `Nur neue Karten exportieren (${fresh} von ${state.cards.filter(c => !c.draft).length} noch nicht exportiert)`;
+  const course = $('#course').value.trim();
+  const mine = state.exportHistory.filter(h => course ? h.course === course : h.deck === deckName).slice(-8).reverse();
+  const box = $('#export-history');
+  box.hidden = !mine.length;
+  fill(box, mine.length ? el('details', { class: 'method' }, el('summary', { text: `Bisherige Exporte${course ? ' für ' + course : ''} (${mine.length})` }),
+    el('ul', {}, ...mine.map(h => el('li', { text: `${h.date}: ${h.deck} · ${h.count} Karten` })))) : null);
 }
 function coveragePrompt(group, cardsInGroup, o) {
   const list = cardsInGroup.map(c => `${c.id} | ${c.slide || '-'} | ${stripHtml(c.front).slice(0, 140)} → ${stripHtml(c.back).slice(0, 100)}`).join('\n');
@@ -1062,7 +1278,7 @@ AUFGABE:
 ${COVER_RULES}
 
 ${STYLE_RULES}
-
+${libraryStyleBlock(o) ? '\n' + libraryStyleBlock(o).split('\n\nBEISPIELE')[0] + '\n' : ''}
 ${typeRules(o)}
 
 ${formulaRules(o)}REGELN:
@@ -1186,11 +1402,13 @@ function readCardOpts() {
     tier: $('#opt-tier').value,
     images: $('#opt-images').checked && caps.imageMax > 0,
     coverage: $('#opt-coverage').checked,
+    libStyle: $('#opt-libstyle').checked && state.library.length > 0,
     req: $('#card-req').value.trim(),
   };
 }
 function saveCardSettings() {
   const o = readCardOpts(); delete o.images;
+  o.libStyle = $('#opt-libstyle').checked; o.libDupes = $('#opt-libdupes').checked;
   store.set('cardOpts', o);
 }
 function renderProgress(listSel, jobs, onRetry) {
@@ -1253,7 +1471,7 @@ async function retryCardJob(job) {
   setCardBusy(false);
 }
 function setCardBusy(b) {
-  $('#gen-cards').disabled = b; $('#stop-cards').hidden = !b; $('#run-coverage').disabled = b; $('#export-apkg').disabled = b;
+  $('#gen-cards').disabled = b; $('#stop-cards').hidden = !b; $('#run-coverage').disabled = b; $('#export-apkg').disabled = b; $('#send-anki').disabled = b;
   renderCardResume();
 }
 function prefetchExportLib() { idle(() => loadScript(CDN.sql).catch(() => {})); }
@@ -1377,7 +1595,9 @@ function renderDeck(soft) {
   $('#deck-body').hidden = !has;
   const s = { basic: 0, reverse: 0, cloze: 0 };
   state.cards.forEach(c => { s[c.type] = (s[c.type] || 0) + 1; });
+  markKnown();
   const dupes = state.cards.filter(c => c.dupe).length;
+  const known = state.cards.filter(c => c.known).length;
   const added = state.cards.filter(c => c.added).length;
   fill($('#deck-stats'), ...(has ? [
     el('span', {}, el('b', { text: state.cards.length }), ' Karten'),
@@ -1388,6 +1608,9 @@ function renderDeck(soft) {
   ] : []));
   $('#drop-dupes').hidden = !dupes;
   $('#drop-dupes').textContent = `Dubletten entfernen (${dupes})`;
+  $('#drop-known').hidden = !known;
+  $('#drop-known').textContent = `Schon vorhandene entfernen (${known})`;
+  renderExportHistory();
   if (!has) return;
   renderCoverage();
   if (!(soft && view.editing)) renderCardList();
@@ -1447,6 +1670,7 @@ function cardView(c) {
       c.kind ? el('span', { class: 'chip', text: c.kind === 'formula' ? 'Formel' : 'Rechnung' }) : null,
       c.added ? el('span', { class: 'chip new', text: 'ergänzt' }) : null,
       c.dupe ? el('span', { class: 'chip warn', text: 'mögliche Dublette' }) : null,
+      c.known ? el('span', { class: 'chip warn', title: `${c.known.src}: ${c.known.f}`, text: c.known.exp ? 'schon exportiert' : 'schon in deinem Deck' }) : null,
       c.topic ? el('span', { class: 'topic', text: c.topic }) : null),
     el('div', { class: 'icard-front', html: front }),
     el('div', { class: 'icard-back', html: back }),
@@ -1616,6 +1840,78 @@ async function packageApkg({ deckName, cards, tags, withImages, onStep }) {
   return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }
 const fileSafe = s => String(s).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Anki-Deck';
+/* ---------- Direkt nach Anki (AnkiConnect) ---------- */
+// Only the public website may talk to Anki on this computer; claude.ai blocks such connections. The site build sets this to true.
+const DIRECT_ANKI = false;
+async function ankiCall(action, params) {
+  // AnkiConnect listens on port 8765; the address can be changed in storage (lernstudio.ankiUrl), e.g. for tests.
+  const url = store.get('ankiUrl', '') || 'http://127.0.0.1:8765';
+  let res;
+  try { res = await fetch(url, { method: 'POST', body: JSON.stringify({ action, version: 6, params: params || {} }) }); }
+  catch { throw new Error('Anki ist nicht erreichbar. Öffne Anki mit dem Add-on AnkiConnect (Code 2055492159) und versuche es erneut. Safari blockiert die Verbindung teils, Chrome, Edge und Firefox fragen einmal nach Erlaubnis.'); }
+  const j = await res.json().catch(() => null);
+  if (!j || typeof j !== 'object' || !('result' in j)) throw new Error('AnkiConnect hat unerwartet geantwortet. Aktualisiere das Add-on.');
+  if (j.error) throw new Error('Anki meldet: ' + j.error);
+  return j.result;
+}
+const blobToB64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
+async function sendToAnki(cards, deckName, withImages, msgEl) {
+  msgEl.className = 'msg'; msgEl.textContent = 'Verbindung zu Anki …';
+  try {
+    const perm = await ankiCall('requestPermission');
+    if (!perm || perm.permission !== 'granted') throw new Error('Anki hat den Zugriff abgelehnt. Erlaube diese Website im Dialog von AnkiConnect.');
+    if (perm.requireApikey) throw new Error('AnkiConnect verlangt einen API-Schlüssel. Entferne ihn in den Einstellungen des Add-ons oder nutze „Anki-Datei speichern“.');
+    // The same note types as in the .apkg export, created once if missing.
+    const have = new Set(await ankiCall('modelNames'));
+    for (const m of Object.values(ankiModels(1, 0))) {
+      if (!have.has(m.name)) await ankiCall('createModel', { modelName: m.name, inOrderFields: m.flds.map(f => f.name), css: m.css, isCloze: m.type === 1, cardTemplates: m.tmpls.map(t => ({ Name: t.name, Front: t.qfmt, Back: t.afmt })) });
+    }
+    await ankiCall('createDeck', { deck: deckName });
+    const images = new Map();
+    if (withImages) {
+      const base = tagSlug(deckName.replace(/::/g, '-')).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'deck';
+      const keys = Array.from(new Set(cards.filter(c => c.slide && pdfDocs.has(c.fileId)).map(c => c.fileId + ':' + c.slide)));
+      for (const [i, k] of keys.entries()) {
+        msgEl.textContent = `Folienbild ${i + 1} von ${keys.length} geht an Anki …`;
+        const [fid, num] = k.split(':').map(Number);
+        const blob = await renderSlide(fid, num);
+        if (!blob) continue;
+        const filename = `lernstudio-${base}-${hash53(deckName).toString(36).slice(0, 6)}-d${fid}-f${num}.jpg`;
+        await ankiCall('storeMediaFile', { filename, data: await blobToB64(blob) });
+        images.set(k, filename);
+      }
+    }
+    const baseTags = [tagSlug($('#course').value), tagSlug($('#lecture').value)].filter(Boolean);
+    const notes = cards.map(c => {
+      const quelle = c.fileName ? escapeHtml(c.fileName.replace(/\.[^.]+$/, '')) : '';
+      const bild = images.has(c.fileId + ':' + c.slide) ? `<img src="${images.get(c.fileId + ':' + c.slide)}">` : '';
+      const model = ankiModels(1, 0)[MODEL_IDS[c.type] || MODEL_IDS.basic];
+      const values = [c.front, c.back || '', quelle, c.slide ? String(c.slide) : '', bild];
+      return { deckName, modelName: model.name, fields: Object.fromEntries(model.flds.map((f, i) => [f.name, values[i]])),
+        tags: Array.from(new Set([...baseTags, tagSlug(c.topic), c.kind === 'formula' ? 'Formel' : c.kind === 'calc' ? 'Rechenaufgabe' : ''].filter(Boolean))),
+        options: { allowDuplicate: false, duplicateScope: 'deck' } };
+    });
+    msgEl.textContent = 'Karten gehen an Anki …';
+    // Anki rejects a note whose first field already exists in the deck, also twice within one batch.
+    const seen = new Set();
+    const unique = notes.filter(n => { const k = n.modelName + '\x1f' + Object.values(n.fields)[0]; if (seen.has(k)) return false; seen.add(k); return true; });
+    const can = await ankiCall('canAddNotes', { notes: unique });
+    const add = unique.filter((n, i) => can[i]);
+    let made = 0;
+    try { made = add.length ? (await ankiCall('addNotes', { notes: add }) || []).filter(Boolean).length : 0; }
+    catch {
+      // Newer AnkiConnect versions fail the whole batch if one note fails; then add them one by one.
+      for (const n of add) { try { if (await ankiCall('addNote', { note: n })) made++; } catch {} }
+    }
+    const skipped = notes.length - made;
+    msgEl.className = 'msg ok';
+    msgEl.textContent = `${made} ${made === 1 ? 'Karte' : 'Karten'} in Anki angelegt, Deck „${deckName}“.` + (skipped ? ` ${skipped} ${skipped === 1 ? 'gab' : 'gab'} es dort schon oder doppelt und ${skipped === 1 ? 'wurde' : 'wurden'} übersprungen.` : '');
+    return true;
+  } catch (e) {
+    msgEl.className = 'msg err'; msgEl.textContent = (e && e.message) || errText(e);
+    return false;
+  }
+}
 async function exportDeck(cards, deckName, withImages, msgEl, extraTag) {
   msgEl.className = 'msg'; msgEl.textContent = 'Anki-Datei wird gebaut …';
   try {
@@ -1629,6 +1925,7 @@ async function exportDeck(cards, deckName, withImages, msgEl, extraTag) {
     await saveFile(base + '.zip', blob);
     msgEl.className = 'msg ok';
     msgEl.textContent = `Gespeichert: ${base}.zip mit ${cards.length} Karten. Entpacken und die .apkg mit Anki öffnen.`;
+    return true;
   } catch (e) {
     msgEl.className = 'msg err';
     msgEl.textContent = errText(e);
@@ -2717,6 +3014,8 @@ function restoreSettings() {
     if (co.tier) $('#opt-tier').value = co.tier;
     $('#opt-coverage').checked = co.coverage !== false;
     $('#opt-formula').checked = co.formula !== false;
+    $('#opt-libstyle').checked = co.libStyle === true;
+    if (co.libDupes === false) $('#opt-libdupes').checked = false;
     $('#card-req').value = co.req || '';
   }
   const qo = store.get('quizOpts', null);
@@ -2756,15 +3055,29 @@ function bind() {
   $('#card-search').addEventListener('input', e => { view.search = e.target.value.trim(); renderCardList(); });
   $('#add-card').addEventListener('click', addCard);
   $('#drop-dupes').addEventListener('click', () => { state.cards = state.cards.filter(c => !c.dupe); saveCards(); renderDeck(); });
+  $('#drop-known').addEventListener('click', e => armConfirm(e.currentTarget, 'Wirklich entfernen?', () => { state.cards = state.cards.filter(c => !c.known); saveCards(); renderDeck(); }));
+  const ldrop = $('#lib-drop');
+  $('#lib-input').addEventListener('change', e => { addLibraryFiles(e.target.files); e.target.value = ''; });
+  ['dragenter', 'dragover'].forEach(t => ldrop.addEventListener(t, e => { e.preventDefault(); ldrop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => ldrop.addEventListener(t, e => { e.preventDefault(); ldrop.classList.remove('over'); }));
+  ldrop.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length) addLibraryFiles(e.dataTransfer.files); });
+  $('#opt-libdupes').addEventListener('change', () => { knownChanged(); renderDeck(true); });
+  $('#deck-name').addEventListener('input', renderExportHistory);
   $('#clear-deck').addEventListener('click', e => armConfirm(e.currentTarget, 'Deck wirklich verwerfen?', () => { state.cards = []; cardJobs = []; cardRun = null; saveCardRun(); paintCardProgress(); saveCards(); renderDeck(); renderCardResume(); }));
-  $('#export-apkg').addEventListener('click', async e => {
+  const exportWith = send => async e => {
     const b = e.currentTarget;
-    const cards = state.cards.filter(c => !c.draft);
-    if (!cards.length) return;
+    const deckName = $('#deck-name').value.trim() || defaultDeckName();
+    const exported = new Set(state.exportHistory.filter(h => h.deck === deckName).flatMap(h => h.guids));
+    const onlyNew = !$('#only-new-row').hidden && $('#opt-onlynew').checked;
+    const cards = state.cards.filter(c => !c.draft && !(onlyNew && exported.has(c.guid)));
+    if (!cards.length) { $('#export-msg').className = 'msg'; $('#export-msg').textContent = 'Alle Karten wurden schon exportiert.'; return; }
     b.disabled = true;
-    await exportDeck(cards, $('#deck-name').value.trim() || defaultDeckName(), $('#opt-slideimg').checked, $('#export-msg'));
+    if (await send(cards, deckName, $('#opt-slideimg').checked, $('#export-msg'))) { recordExport(deckName, cards); renderDeck(true); }
     b.disabled = false;
-  });
+  };
+  $('#export-apkg').addEventListener('click', exportWith(exportDeck));
+  $('#send-anki').addEventListener('click', exportWith(sendToAnki));
+  $('#send-anki').hidden = $('#send-anki-hint').hidden = !DIRECT_ANKI;
   ['input', 'change'].forEach(t => {
     $('#view-karten').addEventListener(t, e => { if (e.target.closest('#card-list, #deck-name, #card-search')) return; saveCardSettings(); });
     $('#quiz-setup').addEventListener(t, e => { if (e.target.id !== 'quiz-load') saveQuizSettings(); });
@@ -2790,6 +3103,7 @@ function init() {
   restoreSettings();
   bind();
   renderFiles();
+  renderLibrary();
   renderDeck();
   renderExamPanel();
   renderCardResume();

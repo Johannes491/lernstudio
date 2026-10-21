@@ -11,6 +11,8 @@ Aus Vorlesungsfolien werden Anki-Karteikarten und Übungsquizze.
 - **Altklausuren:** Pro Fach Altklausuren hochladen (PDF, auch gescannt, Fotos, Word, Text). Claude liest jede Seite auch als Bild, also auch R-Outputs, Grafiken und ausgefüllte Antwortbögen, und erstellt pro Klausur einen Bauplan: Aufgaben, Themen, Formulierungen, Lösungen, Zeit und Bewertung. Klausuren aus einem anderen Fach werden gemeldet und weggelassen.
 - **Probeklausuren:** folgen einer gewählten Altklausur oder einem jedes Mal neu gemischten Mix aus allen. Themen und Aufgabenarten bleiben gleich, Aussagen und Zahlen sind neu. Aufgaben mit mehreren Aussagen (a–e, keine bis alle richtig) werden wie in der Klausur Aussage für Aussage bewertet, mit Zeitlimit und Punktabzug wie im Original.
 - **Formel-Modus:** jede Formel als eigene Karte plus Rechenbeispiel.
+- **Eigene Decks:** Vorhandene Anki-Decks (.apkg) hochladen. Neue Karten, die es dort schon gibt, werden markiert; auf Wunsch übernimmt Claude den Stil dieser Decks. Exporte werden pro Kurs festgehalten, und „Nur neue Karten“ exportiert nur, was noch fehlt.
+- **Direkt nach Anki** (nur Website): mit dem Add-on AnkiConnect landen die Karten ohne Datei direkt in Anki.
 - **Schwierige PDFs:** Folien, deren Text beim Auslesen Formeln verliert oder als Zeichensalat ankommt, gehen automatisch als Bild an Claude.
 - **Fortsetzen:** Claude arbeitet nur, solange die Seite offen ist. Wird sie mitten in einem Lauf geschlossen, bleibt alles Fertige gespeichert, und „Fortsetzen“ erstellt beim nächsten Öffnen nur den Rest.
 

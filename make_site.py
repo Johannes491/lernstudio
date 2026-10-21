@@ -18,7 +18,7 @@ CLAUDE_AI_URL = "https://claude.ai/artifact/AFmAvNHL7PmobSAQskKrmB"
 CSP = (
     "default-src 'none'; "
     "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-    "connect-src https://api.anthropic.com; "
+    "connect-src https://api.anthropic.com http://127.0.0.1:* http://localhost:*; "
     "img-src 'self' data: blob:; "
     "style-src 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src https://fonts.gstatic.com data:; "
@@ -384,6 +384,9 @@ body = replace(body, """    const base = fileSafe(deckName.split('::').pop());
     msgEl.className = 'msg ok';
     msgEl.textContent = `Gespeichert: ${base}.apkg mit ${cards.length} Karten. Ein Doppelklick öffnet sie in Anki.`;""")
 body = replace(body, "  msg.className = 'msg'; msg.textContent = 'Bitte bestätige das Speichern.';\n", "  msg.className = 'msg';\n")
+
+# direct export to Anki through AnkiConnect works only here (claude.ai blocks local connections)
+body = replace(body, "const DIRECT_ANKI = false;", "const DIRECT_ANKI = true;")
 
 # start-up and key controls
 body = replace(body, "  initCaps();\n", "  paintKey();\n  idle(() => loadSdk().catch(() => {}));\n")

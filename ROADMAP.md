@@ -10,10 +10,12 @@
 | Läufe nach dem Schließen fortsetzen statt neu starten | erledigt |
 
 ## Phase 2: Mehr aus den eigenen Decks machen
-- Eigenes Deck als Stilvorlage hochladen
-- Dublettenschutz gegen vorhandene Decks
-- Direkt nach Anki senden (AnkiConnect)
-- Kartenverlauf pro Kurs, Export nur neuer Karten
+| Was | Stand |
+|---|---|
+| Eigenes Deck als Stilvorlage hochladen | erledigt: .apkg/.colpkg (auch aktuelles Anki-Format), Beispiele und Kennzahlen, bevorzugt aus dem gleichen Kurs; als Option, weil der Lernstudio-Stil bewusst mehr Fettdruck und Anzahlen nutzt |
+| Dublettenschutz gegen vorhandene Decks | erledigt: jede neue Frage wird mit den eigenen Decks und früheren Exporten verglichen, mit Quelle und Unterdeck |
+| Direkt nach Anki senden (AnkiConnect) | erledigt auf der Website (claude.ai erlaubt keine Verbindung zu Anki); legt Notiztypen, Deck und Folienbilder an, überspringt vorhandene Karten |
+| Kartenverlauf pro Kurs, Export nur neuer Karten | erledigt |
 
 ## Phase 3: Lernsteuerung und neue Quellen
 - Schwächen-Training aus gesammelten Quizergebnissen
