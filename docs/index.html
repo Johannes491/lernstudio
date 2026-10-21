@@ -206,6 +206,15 @@ details.method p{margin-top:6px;max-width:68ch}
 .qdot.part{background:var(--warn-soft);border-color:var(--warn)}
 .qtext{font-size:18px;line-height:1.45;font-weight:600;max-width:70ch;overflow-wrap:anywhere}
 .qinstr{font-size:13.5px;color:var(--muted)}
+.stimulus{margin:0;font-family:var(--f-mono);font-size:12.5px;line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow:auto;white-space:pre;max-height:420px}
+.clock{font-family:var(--f-mono);font-size:12px;padding:3px 8px;border-radius:4px;background:var(--accent-soft);color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+.clock.low{background:var(--bad-soft);color:var(--bad)}
+.profile{display:grid;gap:12px;border-top:1px solid var(--line);padding-top:14px}
+.profile-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 18px;margin:0}
+.profile-grid div{min-width:0}
+.profile-grid dt{font-size:12.5px;color:var(--muted);font-weight:600}
+.profile-grid dd{margin:2px 0 0;overflow-wrap:anywhere}
+.profile ul{margin:4px 0 0;padding-left:1.2em}
 .opts{display:grid;gap:8px}
 .opt{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px;align-items:start;padding:10px 12px;border:1px solid var(--line);border-radius:8px;cursor:pointer;background:var(--surface)}
 .opt:hover{border-color:var(--accent)}
@@ -270,6 +279,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
       </div>
       <label class="choice"><input type="checkbox" id="key-remember"><span>Auf diesem Gerät merken<small>Nur auf deinem eigenen Gerät. Sonst vergisst der Browser den Schlüssel, wenn du den Tab schließt.</small></span></label>
       <p id="key-msg" class="msg" role="status"></p>
+      <p class="hint">Kein API-Guthaben? Mit einem Konto bei claude.ai kannst du die <a href="https://claude.ai/artifact/AFmAvNHL7PmobSAQskKrmB" target="_blank" rel="noopener noreferrer">Version für claude.ai</a> nutzen. Sie läuft über dein Claude-Abo statt über einen API-Schlüssel.</p>
       <details class="method">
         <summary>Was kostet das?</summary>
         <p>Anthropic rechnet direkt über dein Konto ab, nach verbrauchten Tokens. Grobe Schätzung für eine Vorlesung mit rund 50 Folien: Karteikarten kosten etwa 0,50–1 $ mit „Gründlich“ (Claude Opus 5.5) und 0,25–0,50 $ mit „Schnell“ (Claude Sonnet 5.5), mit Folienbildern etwas mehr. Ein Quiz mit 15 Fragen kostet etwa 0,15–0,45 $. Nach jedem Durchlauf zeigt das Lernstudio die ungefähren Kosten an. Ein Monatslimit in der Console verhindert, dass mehr ausgegeben wird als geplant.</p>
@@ -342,6 +352,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
           </div>
           <label class="choice"><input type="checkbox" id="opt-images"><span>Folienbilder an Claude mitsenden<small id="opt-images-hint">Liest auch Diagramme, Abbildungen und gescannte Folien. Nur bei PDF.</small></span></label>
           <label class="choice"><input type="checkbox" id="opt-coverage" checked><span>Abdeckung prüfen und Lücken füllen<small>Ein zweiter Durchgang vergleicht Folie für Folie mit den Karten und ergänzt Fehlendes.</small></span></label>
+          <label class="choice"><input type="checkbox" id="opt-formula" checked><span>Formeln und Rechenwege<small>Jede Formel als eigene Karte, dazu Rechenbeispiele mit Lösungsweg.</small></span></label>
           <label><span class="lbl">Deine Anforderungen an die Karten</span>
             <textarea id="card-req" rows="4" placeholder="z. B. Bei Studien immer Autor, Jahr, Methode und Befund abfragen. Englische Fachbegriffe in Klammern ergänzen. Folien 1–3 auslassen."></textarea>
           </label>
@@ -396,6 +407,25 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
 
       <!-- QUIZ -->
       <section id="view-quiz" role="tabpanel" aria-labelledby="tab-quiz" class="stack" hidden>
+        <div class="panel" id="exam-panel">
+          <div class="panel-head"><h2>Altklausuren</h2><span id="exam-status" class="hint"></span></div>
+          <p class="hint">Jedes Fach bekommt seinen eigenen Klausurstil. Wähle zuerst das Fach und lade dann dessen Altklausuren, Probeklausuren oder Beispielfragen hoch. Claude erkennt daraus das Prüfungsformat: Aufgabentypen, Formulierungen, Niveau, Punkte und Zeit. Quizze und Probeklausuren übernehmen diesen Stil, mit Inhalten aus deinem Vorlesungsmaterial.</p>
+          <label><span class="lbl">Fach</span><input type="text" id="exam-subject" list="exam-subjects" placeholder="z. B. Diagnostik I" autocomplete="off"></label>
+          <datalist id="exam-subjects"></datalist>
+          <label class="drop" id="exam-drop">
+            <input type="file" id="exam-input" multiple accept=".pdf,.pptx,.docx,.txt,.md,.jpg,.jpeg,.png,.webp">
+            <span class="drop-title">Altklausuren hierher ziehen oder auswählen</span>
+            <span class="drop-hint">PDF (auch gescannt), Fotos (JPG, PNG), Word, PowerPoint, Text. Mehrere Fotos einer Klausur zusammen auswählen.</span>
+          </label>
+          <p id="exam-others" class="hint" hidden></p>
+          <ul id="exam-list" class="file-list"></ul>
+          <div class="actions">
+            <button type="button" id="exam-analyze" class="btn">Klausurstil erkennen</button>
+            <span id="exam-msg" class="hint" role="status"></span>
+          </div>
+          <div id="exam-profile" class="profile" hidden></div>
+        </div>
+
         <div class="panel" id="quiz-setup">
           <div class="panel-head"><h2>Quiz erstellen</h2></div>
           <fieldset>
@@ -438,6 +468,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
               </select>
             </label>
           </div>
+          <label class="choice"><input type="checkbox" id="q-examstyle" disabled><span>Im Stil der Altklausuren<small id="q-examstyle-hint">Lade oben Altklausuren hoch und lass den Klausurstil erkennen.</small></span></label>
           <label><span class="lbl">Deine Anforderungen an das Quiz</span>
             <textarea id="quiz-req" rows="4" placeholder="z. B. Schwerpunkt auf Studien und deren Befunden. Fallvignetten für Anwendungsfragen. Formulierungen wie in der Altklausur: „Welche Aussage trifft zu?“"></textarea>
           </label>
@@ -492,6 +523,11 @@ function el(tag, attrs, ...kids) {
   for (const kid of kids.flat()) if (kid != null && kid !== false) n.append(kid instanceof Node ? kid : String(kid));
   return n;
 }
+// replaceChildren would print null/false placeholders as text; fill() skips them like el() does.
+function fill(node, ...kids) {
+  node.replaceChildren(...kids.flat().filter(k => k != null && k !== false));
+  return node;
+}
 const store = {
   get(k, d) { try { const v = localStorage.getItem('lernstudio.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('lernstudio.' + k, JSON.stringify(v)); return true; } catch { return false; } },
@@ -535,7 +571,8 @@ const API_BASE = undefined; // undefined: the SDK's default, https://api.anthrop
 const MODELS = { complex: 'claude-opus-5-5', default: 'claude-sonnet-5-5' };
 // US dollars per million tokens (input, output): Claude API list prices, October 2026.
 const PRICES = { 'claude-opus-5-5': [4, 20], 'claude-sonnet-5-5': [2, 10], 'claude-opus-5': [5, 25], 'claude-opus-4-8': [5, 25], 'claude-sonnet-5': [2, 10] };
-const caps = { imageMax: 8 };
+// The API accepts many images per request; slide chunks stay at 6-12 slides anyway.
+const caps = { imageMax: 20 };
 const usage = { cost: 0 };
 // Over the API every section of a typical lecture can run at once; the SDK waits and retries
 // on rate limits and overloads by itself (new accounts start with lower limits).
@@ -778,7 +815,13 @@ const state = {
   units: store.get('units', []),
   cards: store.get('cards', []),
   quiz: store.get('quiz', null),
+  exams: store.get('exams', []),
+  examStyles: store.get('examStyles', null) || {},
 };
+{
+  const old = store.get('examStyle', null);
+  if (old && !Object.keys(state.examStyles).length) state.examStyles[old.subject || 'Allgemein'] = old;
+}
 const pdfDocs = new Map(); // fileId -> pdf.js document (only for files loaded in this session)
 state.files.forEach(f => { f.live = false; });
 function saveMaterial() {
@@ -803,7 +846,7 @@ function splitText(text, base) {
   if (cur) out.push(cur);
   return out.map((t, i) => ({ kind: base, num: i + 1, label: base + ' ' + (i + 1), text: t }));
 }
-async function parsePdf(file, entry) {
+async function readPdf(file) {
   await loadScript(CDN.pdf);
   await loadScript(CDN.pdfWorker);
   if (!window.pdfjsLib) throw new Error('Der PDF-Leser konnte nicht geladen werden.');
@@ -819,6 +862,10 @@ async function parsePdf(file, entry) {
     units.push({ kind: 'Folie', num: i, label: 'Folie ' + i, text: cleanText(t) });
     page.cleanup();
   }
+  return { doc, units };
+}
+async function parsePdf(file, entry) {
+  const { doc, units } = await readPdf(file);
   pdfDocs.set(entry.id, doc);
   entry.live = true;
   return units;
@@ -936,7 +983,7 @@ function suggestNames() {
 }
 function renderFiles() {
   const ul = $('#file-list');
-  ul.replaceChildren(...state.files.map(f => {
+  fill(ul, ...state.files.map(f => {
     let meta, cls = 'file-meta';
     if (f.status === 'lädt') meta = 'wird gelesen …';
     else if (f.status === 'error') { meta = f.error; cls += ' err'; }
@@ -1034,7 +1081,9 @@ async function shrinkJpeg(blob, width) {
 }
 async function drawSlide(fileId, num, width) {
   const doc = pdfDocs.get(fileId);
-  if (!doc) return null;
+  return doc ? drawPage(doc, num, width) : null;
+}
+async function drawPage(doc, num, width) {
   const page = await doc.getPage(num);
   const vp1 = page.getViewport({ scale: 1 });
   const vp = page.getViewport({ scale: Math.min(3, width / vp1.width) });
@@ -1095,6 +1144,15 @@ function typeRules(o) {
 ${o.reverse ? '- "reverse": Fachbegriff ↔ Definition, wenn beide Richtungen prüfungsrelevant sind (z. B. anatomische Begriffe, Abkürzungen, Fachterminologie). "front" = Begriff, "back" = kurze Definition. Sparsam einsetzen.' : '- Verwende KEINE "reverse"-Karten.'}
 ${o.cloze ? '- "cloze": Lückentext für feste Definitionen, Zahlen, Formeln und Merksätze. "front" enthält den Satz mit {{c1::Lücke}}; mehrere unabhängige Lücken als {{c1::…}}, {{c2::…}}. Pro Lücke ein Schlüsselbegriff, nie halbe Sätze. "back" ist ein optionaler Zusatz oder "".' : '- Verwende KEINE "cloze"-Karten.'}`;
 }
+function formulaRules(o) {
+  if (!o.formula) return '';
+  return `FORMELN UND RECHNUNGEN (Formeln müssen in der Klausur auswendig gekonnt und angewendet werden):
+- Jede Formel im Material bekommt eine eigene Karte: "front" fragt nach der Formel (z. B. „Wie lautet die Formel für …?“), "back" enthält die Formel und die Bedeutung jedes Symbols. Setze "kind":"formula".
+- Zu jeder Formel, die man anwenden kann, kommt eine Rechenkarte mit konkreten Zahlen: "front" gibt die Werte vor, "back" zeigt Rechenweg und Ergebnis. Übernimm Rechenbeispiele aus dem Material; fehlen sie, wähle einfache eigene Zahlen und rechne das Ergebnis exakt nach (nur hier sind eigene Zahlen erlaubt). Setze "kind":"calc".
+- Schreibe Formeln als Text mit <sub> und <sup>, z. B. X<sub>Person</sub> = σ + β · θ<sub>Person</sub>, nicht als LaTeX.
+
+`;
+}
 function langRule(o) {
   return { auto: 'Schreibe in der Sprache der jeweiligen Folien: deutsche Folien → deutsche Karten, englische Folien → englische Karten.', de: 'Schreibe auf Deutsch. Stehen die Folien auf Englisch, ergänze den englischen Fachbegriff in Klammern.', en: 'Write the cards in English.' }[o.lang];
 }
@@ -1115,7 +1173,7 @@ ${STYLE_RULES}
 
 ${typeRules(o)}
 
-${COVER_RULES}
+${formulaRules(o)}${COVER_RULES}
 
 REGELN:
 - Nutze nur Inhalte aus dem Material. Erfinde keine Fakten, Studien, Jahreszahlen oder Zahlen. Enthält eine Folie nur Stichworte, bleib nah an diesen Stichworten.
@@ -1153,7 +1211,7 @@ ${STYLE_RULES}
 
 ${typeRules(o)}
 
-REGELN:
+${formulaRules(o)}REGELN:
 - Nur Inhalte aus dem Material, nichts erfinden.
 - "slide": die Nummer N aus der Überschrift „=== Datei · Folie N ===“.
 - Sprache: ${langRule(o)}
@@ -1220,7 +1278,7 @@ function normalizeCards(arr, chunk, o, markNew) {
     if (!stripHtml(front) || (type !== 'cloze' && !stripHtml(back))) continue;
     let slide = parseInt(r.slide, 10);
     if (!nums.includes(slide)) slide = Number.isFinite(slide) ? nums.reduce((b, n) => Math.abs(n - slide) < Math.abs(b - slide) ? n : b, nums[0]) : nums[0];
-    out.push({ id: newId('k'), guid: newGuid(), type, front, back, fileId: chunk.fileId, fileName: chunk.fileName, slide, topic: String(r.topic || '').replace(/\s+/g, ' ').trim().slice(0, 60), added: !!markNew });
+    out.push({ id: newId('k'), guid: newGuid(), type, front, back, fileId: chunk.fileId, fileName: chunk.fileName, slide, topic: String(r.topic || '').replace(/\s+/g, ' ').trim().slice(0, 60), added: !!markNew, kind: ['formula', 'calc'].includes(r.kind) ? r.kind : undefined });
   }
   return out;
 }
@@ -1238,6 +1296,7 @@ function readCardOpts() {
   return {
     density: ($('input[name=density]:checked') || {}).value || 'vollstaendig',
     reverse: $('#opt-reverse').checked,
+    formula: $('#opt-formula').checked,
     cloze: $('#opt-cloze').checked,
     lang: $('#opt-lang').value,
     tier: $('#opt-tier').value,
@@ -1251,7 +1310,7 @@ function saveCardSettings() {
   store.set('cardOpts', o);
 }
 function renderProgress(listSel, jobs, onRetry) {
-  $(listSel).replaceChildren(...jobs.map(j => el('li', { class: 'prow', 'data-s': j.status },
+  fill($(listSel), ...jobs.map(j => el('li', { class: 'prow', 'data-s': j.status },
     el('span', { class: 'dot', 'aria-hidden': 'true' }),
     el('span', { text: j.label }),
     el('span', { class: 'mono muted' }, j.status === 'fertig' ? j.done : j.status === 'fehler' ? '' : j.status === 'läuft' && j.live ? 'läuft · ' + j.live : j.status),
@@ -1393,7 +1452,7 @@ function renderDeck(soft) {
   state.cards.forEach(c => { s[c.type] = (s[c.type] || 0) + 1; });
   const dupes = state.cards.filter(c => c.dupe).length;
   const added = state.cards.filter(c => c.added).length;
-  $('#deck-stats').replaceChildren(...(has ? [
+  fill($('#deck-stats'), ...(has ? [
     el('span', {}, el('b', { text: state.cards.length }), ' Karten'),
     el('span', {}, el('b', { text: s.basic }), ' Frage – Antwort'),
     s.reverse ? el('span', {}, el('b', { text: s.reverse }), ' Umkehr') : null,
@@ -1411,7 +1470,7 @@ function renderCoverage() {
   const counts = new Map();
   state.cards.forEach(c => { const k = c.fileId + ':' + c.slide; counts.set(k, (counts.get(k) || 0) + 1); });
   const files = state.files.filter(f => f.status === 'ok' && state.units.some(u => u.fileId === f.id));
-  if (!files.length) { wrap.replaceChildren(); return; }
+  if (!files.length) { fill(wrap); return; }
   let content = 0, covered = 0;
   const blocks = files.map(f => {
     const units = state.units.filter(u => u.fileId === f.id);
@@ -1426,7 +1485,7 @@ function renderCoverage() {
     });
     return el('div', { class: 'cov-file' }, el('span', { class: 'cov-label', text: f.name }), el('div', { class: 'cells' }, cells));
   });
-  wrap.replaceChildren(
+  fill(wrap, 
     el('div', { class: 'panel-head' }, el('h3', { text: 'Folienabdeckung' }), el('span', { class: 'mono muted', text: `${covered}/${content} Inhaltsfolien mit Karte` })),
     ...blocks,
     el('div', { class: 'legend' }, el('span', {}, el('i', { class: 'has' }), 'hat Karten'), el('span', {}, el('i', { class: 'miss' }), 'ohne Karte'), el('span', {}, el('i', {}), 'kaum Text'), el('span', { text: 'Foliennummer = Seite im PDF. Klick auf eine Folie filtert die Karten.' })));
@@ -1446,9 +1505,9 @@ function renderCardList() {
   if (view.slide) { const [fid, num] = view.slide.split(':'); const f = state.files.find(x => String(x.id) === fid); parts.push(`${f ? f.name + ' · ' : ''}Folie ${num}`); }
   if (view.search) parts.push(`Suche „${view.search}“`);
   note.hidden = !parts.length;
-  if (parts.length) note.replaceChildren(`${list.length} von ${state.cards.length} Karten · ${parts.join(' · ')} `, el('button', { type: 'button', class: 'btn small ghost', onclick: () => { view.slide = null; view.search = ''; $('#card-search').value = ''; renderCoverage(); renderCardList(); } }, 'Filter aufheben'));
+  if (parts.length) fill(note, `${list.length} von ${state.cards.length} Karten · ${parts.join(' · ')} `, el('button', { type: 'button', class: 'btn small ghost', onclick: () => { view.slide = null; view.search = ''; $('#card-search').value = ''; renderCoverage(); renderCardList(); } }, 'Filter aufheben'));
   const shown = list.slice(0, 400);
-  $('#card-list').replaceChildren(...shown.map(c => view.editing === c.id ? cardEditor(c) : cardView(c)),
+  fill($('#card-list'), ...shown.map(c => view.editing === c.id ? cardEditor(c) : cardView(c)),
     list.length > shown.length ? el('p', { class: 'hint', text: `${list.length - shown.length} weitere Karten ausgeblendet. Nutze Suche oder Folienfilter.` }) : null);
 }
 function cardView(c) {
@@ -1458,6 +1517,7 @@ function cardView(c) {
     el('div', { class: 'icard-meta' },
       c.slide ? el('span', { class: 'chip', text: 'Folie ' + c.slide }) : null,
       el('span', { class: 'chip type', text: TYPE_LABEL[c.type] }),
+      c.kind ? el('span', { class: 'chip', text: c.kind === 'formula' ? 'Formel' : 'Rechnung' }) : null,
       c.added ? el('span', { class: 'chip new', text: 'ergänzt' }) : null,
       c.dupe ? el('span', { class: 'chip warn', text: 'mögliche Dublette' }) : null,
       c.topic ? el('span', { class: 'topic', text: c.topic }) : null),
@@ -1528,7 +1588,8 @@ table{border-collapse:collapse;font-size:16px;margin:6px 0}td,th{border:1px soli
 .src{margin-top:14px;font-size:12px;color:#8a90a0}
 .night_mode .card,.nightMode .card,.card.nightMode{background:#1d2028;color:#e8eaf0}
 .night_mode .cloze,.nightMode .cloze{color:#9db3f5}
-.night_mode th,.nightMode th{background:#2b3346}`;
+.night_mode th,.nightMode th{background:#2b3346}
+pre{white-space:pre-wrap;font-family:Menlo,Consolas,monospace;font-size:14px;line-height:1.4}`;
 const LATEX_PRE = '\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage[utf8]{inputenc}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}\n';
 function ankiModels(deckId, nowS) {
   const fld = (name, ord) => ({ name, ord, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] });
@@ -1593,7 +1654,7 @@ async function buildApkg({ deckName, cards, tags, images }) {
       const bild = images && images.has(c.fileId + ':' + c.slide) ? `<img src="${images.get(c.fileId + ':' + c.slide)}">` : '';
       const flds = [c.front, c.back || '', quelle, c.slide ? String(c.slide) : '', bild].map(f => String(f).replace(/\x1f/g, ' '));
       const sfld = stripHtml(flds[0]);
-      const noteTags = [...tags, tagSlug(c.topic)].filter(Boolean);
+      const noteTags = [...tags, tagSlug(c.topic), c.kind === 'formula' ? 'Formel' : c.kind === 'calc' ? 'Rechenaufgabe' : ''].filter(Boolean);
       insN.run([++nid, c.guid || newGuid(), mid, nowS, -1, noteTags.length ? ' ' + Array.from(new Set(noteTags)).join(' ') + ' ' : '', flds.join('\x1f'), sfld, await csumOf(sfld), 0, '']);
       const ords = c.type === 'cloze' ? clozeOrds(c.front) : c.type === 'reverse' ? [0, 1] : [0];
       for (const ord of ords) insC.run([++cid, nid, did, ord, nowS, -1, 0, 0, due, 0, 0, 0, 0, 0, 0, 0, 0, '']);
@@ -1655,7 +1716,25 @@ function readQuizOpts() {
     mode: $('#q-mode').value,
     tier: $('#q-tier').value,
     req: $('#quiz-req').value.trim(),
+    examStyleOn: $('#q-examstyle').checked,
   };
+}
+// Quiz options that follow a recognized exam style: its task types, their shares and its number of options.
+function styleOpts(st) {
+  return { examStyle: st, types: Object.keys(st.shares).filter(t => st.shares[t] > 0), typeWeights: st.shares, k: Math.max(3, Math.min(6, st.options || 5)) };
+}
+function examStyleBlock(o) {
+  const st = o.examStyle;
+  if (!st) return '';
+  const ex = st.examples.map(x => `  • [${QTYPE_LABEL[x.type]}] ${x.text}${x.answer ? ' → ' + x.answer : ''}`).join('\n');
+  return `STIL DER ALTKLAUSUREN (übernimm Format, Formulierungen, Schwierigkeit und Aufgabenarten; die Inhalte kommen ausschließlich aus dem Vorlesungsmaterial, nicht aus den Beispielen):
+- Überblick: ${st.summary || '–'}
+- Niveau: ${st.level || '–'}
+- Typische Formulierungen: ${st.phrasing.length ? st.phrasing.map(x => '„' + x + '“').join('; ') : '–'}
+- Besonderheiten: ${st.features.length ? st.features.join('; ') : '–'}
+${ex ? '- Beispielaufgaben aus den Altklausuren (nur als Stilvorlage):\n' + ex + '\n' : ''}- Enthalten die Altklausuren Aufgaben zu R-Outputs, Tabellen, Rechnungen oder Fallvignetten, baue solche Aufgaben ebenfalls ein und lege das Material dafür in "stimulus" (z. B. ein plausibler R-Output, eine Tabelle oder eine kurze Fallbeschreibung, passend zu den Inhalten der Vorlesung). Für dieses Material darfst du Beispielzahlen wählen; sie müssen in sich stimmig und nachrechenbar sein. Mehrere Wahr/Falsch-Aussagen dürfen sich auf denselben "stimulus" beziehen (dann in jeder Aussage wiederholen).
+
+`;
 }
 function saveQuizSettings() { store.set('quizOpts', readQuizOpts()); }
 function planText(plan, tfTrue) {
@@ -1683,12 +1762,13 @@ ERSTELLE GENAU: ${planText(plan, tfTrue)}.
 
 NIVEAU: ${levelRule(o.level)}
 
-ALLGEMEINE REGELN:
+${examStyleBlock(o)}ALLGEMEINE REGELN:
 - Nur Inhalte aus dem Material, nichts erfinden. Jede Frage nennt die Folie ("slide" = Nummer N aus „=== Datei · Folie N ===“).
 - Verteile die Fragen über den gesamten Ausschnitt und frage das Wichtigste ab (Definitionen, Modelle, Studien und Befunde, Unterschiede, Kritik, Anwendung).
 - Jede Frage ist für sich verständlich und eindeutig, prüft genau einen Gedanken und hat eine fachlich eindeutig richtige Lösung. Keine Spitzfindigkeiten.
 - Schreibe in der Sprache des Materials. Nur reiner Text, kein HTML, kein Markdown.
 - "level" ist eine der Stufen Erinnern, Verstehen, Anwenden, Analysieren. "topic": Unterthema in 1–4 Wörtern.
+- Optionales Feld "stimulus" (bei jedem Typ): Material, auf das sich die Aufgabe bezieht, z. B. R-Output, Tabelle, Fallvignette oder Zahlenwerte. Zeilenumbrüche darin als \\n.
 
 WAHR/FALSCH ("tf"):
 - Genau eine Aussage pro Item. Falsche Aussagen enthalten eine typische Verwechslung oder einen typischen Denkfehler, nicht bloß ein eingefügtes „nicht“.
@@ -1755,7 +1835,8 @@ function largestRemainder(total, weights) {
 function normalizeQuestions(arr, chunk, o) {
   if (!Array.isArray(arr)) throw { code: 'bad_shape' };
   const nums = chunk.units.map(u => u.num);
-  const txt = v => String(v == null ? '' : v).replace(/<[^>]+>/g, '').trim();
+  // Only known HTML tags are removed, so statistics such as "p < .05" stay intact (text is shown with textContent).
+  const txt = v => String(v == null ? '' : v).replace(/<\/?(b|i|u|em|strong|br|p|span|code|sub|sup)\b[^>]*>/gi, '').trim();
   const out = [];
   for (const r of arr) {
     if (!r || typeof r !== 'object') continue;
@@ -1763,6 +1844,8 @@ function normalizeQuestions(arr, chunk, o) {
     if (!o.types.includes(type)) continue;
     let slide = parseInt(r.slide, 10); if (!nums.includes(slide)) slide = Number.isFinite(slide) ? slide : null;
     const q = { id: newId('q'), type, slide, fileName: chunk.fileName, topic: txt(r.topic).slice(0, 60) || 'Allgemein', level: txt(r.level) || '' };
+    const stim = String(r.stimulus == null ? '' : r.stimulus).trim();
+    if (stim) q.stimulus = stim.slice(0, 4000);
     if (type === 'tf') {
       const ans = r.answer === true || r.answer === 'true' || r.answer === 'wahr' ? true : r.answer === false || r.answer === 'false' || r.answer === 'falsch' ? false : null;
       if (!txt(r.statement) || ans === null) continue;
@@ -1785,7 +1868,10 @@ function normalizeQuestions(arr, chunk, o) {
   return out;
 }
 function paintQuizProgress() { renderProgress('#quiz-progress', quizJobs, retryQuizJob); }
-function setQuizBusy(b) { $('#gen-quiz').disabled = b; $('#stop-quiz').hidden = !b; if (b) $('#start-quiz').hidden = true; }
+function setQuizBusy(b) {
+  $('#gen-quiz').disabled = b; $('#stop-quiz').hidden = !b; if (b) $('#start-quiz').hidden = true;
+  const mb = document.getElementById('mock-exam'); if (mb) mb.disabled = b;
+}
 let quizPaintTimer = 0;
 function scheduleQuizPaint() { if (!quizPaintTimer) quizPaintTimer = setTimeout(() => { quizPaintTimer = 0; paintQuizProgress(); }, 300); }
 async function runQuizJob(job, o) {
@@ -1826,9 +1912,13 @@ function afterQuizGen() {
   $('#start-quiz').textContent = `Quiz mit ${n} Fragen starten`;
   $('#gen-quiz-msg').textContent = quizCtl && quizCtl.signal.aborted ? (quizCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Teil ist' : 'Teile sind'} fehlgeschlagen.` : n ? `Fertig${costNote(quizCost0)}.` : '';
 }
-async function generateQuiz() {
+async function generateQuiz(override) {
   const msg = $('#gen-quiz-msg'); msg.textContent = '';
-  const o = readQuizOpts(); saveQuizSettings();
+  const o = Object.assign(readQuizOpts(), override || {});
+  if (!override) {
+    saveQuizSettings();
+    if (o.examStyleOn && currentStyle()) Object.assign(o, styleOpts(currentStyle()));
+  }
   if (!o.types.length) { msg.textContent = 'Wähle mindestens einen Fragetyp.'; return; }
   if (!state.units.length) { msg.textContent = 'Lade zuerst links Vorlesungsmaterial.'; return; }
   if (!hasKey()) { msg.textContent = errText({ code: 'no_key' }); focusKey(); return; }
@@ -1839,7 +1929,7 @@ async function generateQuiz() {
   const chunks = makeChunks(units, Math.ceil(total / parts) + 1, 1000);
   if (!chunks.length) { msg.textContent = 'Im Material wurde kein Text gefunden.'; return; }
   const quotas = largestRemainder(o.count, chunks.map(c => c.chars));
-  const typeCounts = largestRemainder(o.count, o.types.map(() => 1));
+  const typeCounts = largestRemainder(o.count, o.types.map(t => o.typeWeights ? o.typeWeights[t] || 0 : 1));
   const slots = shuffle(o.types.flatMap((t, i) => Array(typeCounts[i]).fill(t)));
   let pos = 0;
   const jobs = [];
@@ -1861,18 +1951,33 @@ async function generateQuiz() {
 }
 function startQuiz() {
   const o = quizJobs.length ? quizJobs[0].opts : readQuizOpts();
-  const title = $('#lecture').value.trim() || $('#course').value.trim() || 'Quiz';
-  state.quiz = newQuizState(shuffle(pendingQuestions.map(q => { const c = Object.assign({}, q); delete c.job; return c; })), o, title);
+  const title = o.title || $('#lecture').value.trim() || $('#course').value.trim() || 'Quiz';
+  state.quiz = newQuizState(shuffle(pendingQuestions.map(q => { const c = Object.assign({}, q); delete c.job; return c; })), o, title, o.timeLimitMin);
   saveQuiz(); showQuizView();
 }
-function newQuizState(questions, o, title) {
-  return { title, created: new Date().toISOString(), settings: { scoring: o.scoring, mode: o.mode, tier: o.tier, k: o.k }, questions, answers: {}, results: {}, checked: {}, idx: 0, submitted: false };
+function newQuizState(questions, o, title, timeLimitMin) {
+  return { title, created: new Date().toISOString(), settings: { scoring: o.scoring, mode: o.mode, tier: o.tier, k: o.k, tfPenalty: !!o.tfPenalty }, questions, answers: {}, results: {}, checked: {}, idx: 0, submitted: false, timeLimitMin: timeLimitMin || null, startedAt: Date.now() };
+}
+// A full mock exam in the recognized style: number of tasks, time, scoring and task types follow the old exams.
+function startMockExam() {
+  const st = currentStyle();
+  if (!st) return;
+  const count = Math.max(5, Math.min(60, st.questionCount || 30));
+  const share = st.questionCount ? Math.min(1, count / st.questionCount) : 1;
+  const timeLimitMin = st.durationMin ? Math.max(5, Math.round(st.durationMin * share)) : null;
+  generateQuiz(Object.assign(styleOpts(st), { count, mode: 'klausur', level: 'klausur', scoring: st.mcScoring, tfPenalty: st.tfPenalty, timeLimitMin, title: 'Probeklausur ' + currentSubject() }));
+}
+function mockExamHint(st) {
+  const count = Math.max(5, Math.min(60, st.questionCount || 30));
+  const share = st.questionCount ? Math.min(1, count / st.questionCount) : 1;
+  const time = st.durationMin ? Math.max(5, Math.round(st.durationMin * share)) : null;
+  return `${count} Aufgaben${time ? `, ${time} Minuten` : ''}, Inhalte aus deinem Vorlesungsmaterial`;
 }
 
 /* ---------- Quiz: Bewertung ---------- */
 function correctIdx(q) { return q.options.map((x, i) => x.correct ? i : -1).filter(i => i >= 0); }
-function autoScore(q, a, scoring) {
-  if (q.type === 'tf') return { score: a === q.answer ? 1 : 0, max: 1 };
+function autoScore(q, a, scoring, tfPenalty) {
+  if (q.type === 'tf') return { score: a == null ? 0 : a === q.answer ? 1 : tfPenalty ? -1 : 0, max: 1 };
   if (q.type === 'single') return { score: a != null && q.options[a] && q.options[a].correct ? 1 : 0, max: 1 };
   if (q.type === 'multi') {
     const sel = new Set(Array.isArray(a) ? a : []);
@@ -1886,7 +1991,7 @@ function resultOf(q) {
   const qz = state.quiz;
   if (q.type === 'open') return qz.results[q.id] || null;
   const a = qz.answers[q.id];
-  return autoScore(q, a, qz.settings.scoring);
+  return autoScore(q, a, qz.settings.scoring, qz.settings.tfPenalty);
 }
 function isAnswered(q) {
   const a = state.quiz.answers[q.id];
@@ -1914,6 +2019,7 @@ async function gradeOpen(q) {
 function showQuizView() {
   const qz = state.quiz;
   $('#quiz-setup').hidden = !!qz;
+  $('#exam-panel').hidden = !!qz;
   $('#quiz-run').hidden = !qz || qz.submitted;
   $('#quiz-result').hidden = !qz || !qz.submitted;
   if (!qz) return;
@@ -1944,17 +2050,18 @@ function renderQuestion() {
       el('span', { class: 'chip', text: `Frage ${qz.idx + 1} / ${qz.questions.length}` }),
       el('span', { class: 'chip type', text: QTYPE_LABEL[q.type] }),
       q.level ? el('span', { class: 'chip', text: q.level }) : null,
-      el('span', { class: 'topic', text: q.topic + (q.slide ? ' · Folie ' + q.slide : '') })),
+      el('span', { class: 'topic', text: q.topic + (q.slide ? ' · Folie ' + q.slide : '') }),
+      qz.timeLimitMin ? el('span', { class: 'clock', id: 'quiz-clock' }) : null),
     el('button', { type: 'button', class: 'btn small ghost', onclick: e => armConfirm(e.currentTarget, 'Quiz wirklich beenden?', () => { state.quiz = null; saveQuiz(); showQuizView(); }) }, 'Quiz beenden'));
   let body;
   const name = 'ans-' + q.id;
   if (q.type === 'tf') {
-    body = el('div', { class: 'opts', role: 'radiogroup', 'aria-label': 'Antwort' }, ...[true, false].map(v => {
+    body = el('div', { class: 'opts', role: 'radiogroup', 'aria-label': 'Antwort' }, ...(qz.settings.tfPenalty ? [true, false, null] : [true, false]).map(v => {
       let cls = 'opt' + (shown ? ' locked' : '');
       if (shown) { if (v === q.answer) cls += a === v ? ' correct' : ' missed'; else if (a === v) cls += ' wrong'; }
       return el('label', { class: cls },
         el('input', { type: 'radio', name, checked: a === v || null, disabled: shown || null, onchange: () => setAns(v) }),
-        el('span', { class: 'otext', text: v ? 'Wahr' : 'Falsch' }));
+        el('span', { class: 'otext', text: v === null ? 'Keine Angabe' : v ? 'Wahr' : 'Falsch' }));
     }));
   } else if (q.type === 'single' || q.type === 'multi') {
     const multi = q.type === 'multi';
@@ -1977,7 +2084,7 @@ function renderQuestion() {
     let t; ta.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => setAns(ta.value), 300); qz.answers[q.id] = ta.value; });
     body = el('label', {}, el('span', { class: 'lbl', text: `Deine Antwort (${fmt(maxOf(q))} Punkte)` }), ta);
   }
-  const instr = q.type === 'multi' ? `Mehrfachauswahl: 1 bis ${q.options.length - 1} Antworten sind richtig.` : q.type === 'single' ? 'Genau eine Antwort ist richtig.' : q.type === 'tf' ? 'Ist die Aussage wahr oder falsch?' : '';
+  const instr = q.type === 'multi' ? `Mehrfachauswahl: 1 bis ${q.options.length - 1} Antworten sind richtig.` : q.type === 'single' ? 'Genau eine Antwort ist richtig.' : q.type === 'tf' ? (qz.settings.tfPenalty ? 'Ist die Aussage wahr oder falsch? Eine falsche Antwort kostet einen Punkt, „Keine Angabe“ zählt 0.' : 'Ist die Aussage wahr oder falsch?') : '';
   const status = el('p', { class: 'msg', role: 'status' });
   const fb = shown ? feedbackBlock(q) : null;
   const last = qz.idx === qz.questions.length - 1;
@@ -1998,10 +2105,34 @@ function renderQuestion() {
   }
   if (last && (!learn || shown)) nav.append(el('button', { type: 'button', class: 'btn primary', onclick: e => submitQuiz(e.currentTarget, status) }, learn ? 'Auswertung' : 'Abgeben'));
   else if (!learn) nav.append(el('button', { type: 'button', class: 'btn ghost', onclick: e => submitQuiz(e.currentTarget, status) }, 'Abgeben'));
-  box.replaceChildren(head, dots,
+  fill(box, head, dots,
+    q.stimulus ? el('pre', { class: 'stimulus', text: q.stimulus }) : null,
     el('p', { class: 'qtext', text: q.type === 'tf' ? q.statement : q.question }),
     instr ? el('p', { class: 'qinstr', text: instr }) : null,
     body, fb, status, nav);
+  ensureClock();
+}
+// Countdown for timed mock exams; at zero the exam is handed in automatically.
+let clockTimer = 0, autoSubmitting = false;
+function ensureClock() {
+  const qz = state.quiz;
+  if (!qz || !qz.timeLimitMin || qz.submitted) { clearInterval(clockTimer); clockTimer = 0; return; }
+  if (!clockTimer) clockTimer = setInterval(tickClock, 1000);
+  tickClock();
+}
+function tickClock() {
+  const qz = state.quiz;
+  if (!qz || !qz.timeLimitMin || qz.submitted) { clearInterval(clockTimer); clockTimer = 0; return; }
+  const left = Math.max(0, qz.startedAt + qz.timeLimitMin * 60000 - Date.now());
+  const node = document.getElementById('quiz-clock');
+  if (node) {
+    node.textContent = `Restzeit ${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`;
+    node.classList.toggle('low', left < 5 * 60000);
+  }
+  if (left === 0 && !autoSubmitting) {
+    autoSubmitting = true;
+    submitQuiz(null, document.querySelector('#quiz-run .msg'), true).finally(() => { autoSubmitting = false; });
+  }
 }
 function feedbackBlock(q) {
   const r = resultOf(q);
@@ -2033,10 +2164,13 @@ async function gradeMany(qs, onProgress) {
   });
   return firstErr;
 }
-async function submitQuiz(btn, status) {
+async function submitQuiz(btn, status, timedOut) {
   const qz = state.quiz;
+  if (!qz || qz.submitted) return;
   const open = qz.questions.filter(q => q.type === 'open' && !qz.results[q.id]);
-  btn.disabled = true;
+  if (btn) btn.disabled = true;
+  status = status || el('p');
+  if (timedOut) qz.timedOut = true;
   status.className = 'msg';
   const err = await gradeMany(open, (d, n) => { if (n) status.textContent = `Claude bewertet offene Antworten (${d}/${n}) …`; });
   if (err) { status.className = 'msg err'; status.textContent = errText(err); }
@@ -2045,7 +2179,8 @@ async function submitQuiz(btn, status) {
 function renderResult() {
   const qz = state.quiz;
   const rows = qz.questions.map(q => ({ q, r: resultOf(q) }));
-  const total = rows.reduce((s, x) => s + (x.r ? x.r.score : 0), 0);
+  // Penalties can push single answers below zero, but never the whole exam.
+  const total = Math.max(0, rows.reduce((s, x) => s + (x.r ? x.r.score : 0), 0));
   const max = rows.reduce((s, x) => s + maxOf(x.q), 0);
   const pct = max ? total / max * 100 : 0;
   const ungraded = rows.filter(x => x.q.type === 'open' && !x.r);
@@ -2061,16 +2196,17 @@ function renderResult() {
   const wrong = rows.filter(x => !x.r || x.r.score < maxOf(x.q) - 1e-9);
   const msg = el('p', { class: 'msg', role: 'status' });
   const box = $('#quiz-result');
-  box.replaceChildren(
+  fill(box, 
     el('div', { class: 'panel-head' }, el('h2', { text: 'Auswertung' }), el('span', { class: 'mono muted', text: qz.title })),
     el('div', { class: 'res-top' },
       el('div', {}, el('div', { class: 'score-big', text: Math.round(pct) + ' %' }), el('p', { class: 'mono muted', text: `${fmt(total)} von ${fmt(max)} Punkten` })),
       el('p', { class: 'hint', style: 'max-width:48ch', text: wrong.length ? `${wrong.length} ${wrong.length === 1 ? 'Frage' : 'Fragen'} nicht voll gelöst. Wiederhole sie gezielt oder speichere sie als Anki-Karten.` : 'Alles richtig. Teste dich in ein paar Tagen erneut, damit das Wissen hält.' })),
+    qz.timedOut ? el('div', { class: 'notice', text: 'Die Zeit war abgelaufen, die Klausur wurde automatisch abgegeben.' }) : null,
     ungraded.length ? el('div', { class: 'notice' }, `${ungraded.length} offene ${ungraded.length === 1 ? 'Antwort wurde' : 'Antworten wurden'} nicht bewertet und zählen mit 0 Punkten. `,
       el('button', { type: 'button', class: 'btn small', onclick: async e => { const b = e.currentTarget; b.disabled = true; const err = await gradeMany(ungraded.map(x => x.q)); renderResult(); if (err) { const m = $('#quiz-result p.msg'); if (m) { m.className = 'msg err'; m.textContent = errText(err); } } } }, 'Jetzt bewerten')) : null,
     el('div', { class: 'actions' },
       wrong.length ? el('button', { type: 'button', class: 'btn primary', onclick: () => { state.quiz = newQuizState(shuffle(wrong.map(x => JSON.parse(JSON.stringify(x.q)))), qz.settings, qz.title + ' (Wiederholung)'); saveQuiz(); showQuizView(); } }, 'Falsche wiederholen') : null,
-      el('button', { type: 'button', class: 'btn', onclick: () => { state.quiz = newQuizState(shuffle(qz.questions.map(q => JSON.parse(JSON.stringify(q)))), qz.settings, qz.title); saveQuiz(); showQuizView(); } }, 'Nochmal komplett'),
+      el('button', { type: 'button', class: 'btn', onclick: () => { state.quiz = newQuizState(shuffle(qz.questions.map(q => JSON.parse(JSON.stringify(q)))), qz.settings, qz.title, qz.timeLimitMin); saveQuiz(); showQuizView(); } }, 'Nochmal komplett'),
       wrong.length ? el('button', { type: 'button', class: 'btn', onclick: () => exportWrongAsCards(wrong.map(x => x.q), msg) }, 'Falsche als Anki-Karten') : null,
       el('button', { type: 'button', class: 'btn', onclick: () => saveQuizFile(msg) }, 'Quiz speichern'),
       el('button', { type: 'button', class: 'btn ghost', onclick: () => { state.quiz = null; saveQuiz(); showQuizView(); } }, 'Neues Quiz')),
@@ -2080,6 +2216,7 @@ function renderResult() {
     el('h3', { text: 'Alle Fragen' }),
     el('div', { class: 'review' }, ...rows.map(({ q }, i) => el('div', { class: 'review-item' },
       el('div', { class: 'actions' }, el('span', { class: 'chip', text: 'Frage ' + (i + 1) }), el('span', { class: 'chip type', text: QTYPE_LABEL[q.type] }), el('span', { class: 'topic', text: q.topic + (q.slide ? ' · Folie ' + q.slide : '') })),
+      q.stimulus ? el('pre', { class: 'stimulus', text: q.stimulus }) : null,
       el('p', { style: 'font-weight:600', text: q.type === 'tf' ? q.statement : q.question }),
       q.type === 'single' || q.type === 'multi' ? reviewOptions(q) : q.type === 'open' ? el('p', { class: 'hint', text: 'Deine Antwort: ' + (String(qz.answers[q.id] || '').trim() || '(keine)') }) : el('p', { class: 'hint', text: 'Deine Antwort: ' + (qz.answers[q.id] === true ? 'Wahr' : qz.answers[q.id] === false ? 'Falsch' : '(keine)') }),
       feedbackBlock(q)))));
@@ -2101,6 +2238,7 @@ function questionToCard(q) {
     front = `${e(q.question)}<ol type="A">${q.options.map(o => `<li>${e(o.text)}</li>`).join('')}</ol>`;
     back = `<ul><li><b>Richtig: ${correctIdx(q).map(i => String.fromCharCode(65 + i)).join(', ')}</b></li>${q.options.map((o, i) => o.why ? `<li>${String.fromCharCode(65 + i)}: ${e(o.why)}</li>` : '').join('')}</ul>`;
   }
+  if (q.stimulus) front = `<pre>${e(q.stimulus)}</pre>` + front;
   const f = state.files.find(x => x.name === q.fileName);
   return { id: newId('k'), guid: newGuid(), type: 'basic', front, back, fileId: f ? f.id : null, fileName: q.fileName || '', slide: q.slide, topic: q.topic };
 }
@@ -2113,7 +2251,7 @@ async function saveQuizFile(msg) {
   msg.className = 'msg';
   try {
     const qz = state.quiz;
-    const data = JSON.stringify({ format: 'lernstudio-quiz', version: 1, title: qz.title, created: qz.created, settings: qz.settings, questions: qz.questions }, null, 1);
+    const data = JSON.stringify({ format: 'lernstudio-quiz', version: 1, title: qz.title, created: qz.created, settings: qz.settings, timeLimitMin: qz.timeLimitMin || null, questions: qz.questions }, null, 1);
     await saveFile('Quiz ' + fileSafe(qz.title) + '.json', data);
     msg.className = 'msg ok'; msg.textContent = 'Quiz gespeichert. Über „Gespeichertes Quiz öffnen“ kannst du es später erneut machen.';
   } catch (e) { msg.className = 'msg err'; msg.textContent = errText(e); }
@@ -2126,9 +2264,216 @@ async function loadQuizFile(file) {
     const ok = d.questions.every(q => q && QTYPE_LABEL[q.type] && (q.type === 'tf' ? typeof q.answer === 'boolean' : q.type === 'open' ? Array.isArray(q.rubric) : Array.isArray(q.options)));
     if (!ok) throw new Error();
     const s = Object.assign({ scoring: 'all', mode: 'lern', tier: 'default', k: 5 }, d.settings || {}, { mode: $('#q-mode').value, scoring: $('#q-scoring').value });
-    state.quiz = newQuizState(shuffle(d.questions), s, String(d.title || 'Quiz'));
+    state.quiz = newQuizState(shuffle(d.questions), s, String(d.title || 'Quiz'), Number(d.timeLimitMin) || null);
     saveQuiz(); showQuizView();
   } catch { msg.textContent = 'Diese Datei ist kein gespeichertes Lernstudio-Quiz.'; }
+}
+
+/* ---------- Altklausuren ---------- */
+const examDocs = new Map(); // exam id -> pdf.js document, this session only (needed for scanned pages)
+function saveExams() {
+  store.set('examStyles', state.examStyles);
+  if (!store.set('exams', state.exams)) store.set('exams', state.exams.map(({ text, ...e }) => e));
+}
+async function addExams(list) {
+  $('#exam-msg').textContent = '';
+  const subject = currentSubject();
+  const newId = () => 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const all = Array.from(list);
+  // Photos chosen together are the pages of one exam.
+  const photos = all.filter(f => /\.(jpe?g|png|webp)$/i.test(f.name));
+  if (photos.length) {
+    const entry = { id: newId(), name: photos.length > 1 ? `${photos.length} Fotos (${photos[0].name} …)` : photos[0].name, pages: photos.length, chars: 0, scanned: photos.map((f, i) => i + 1), status: 'ok', text: '', subject, photos: true };
+    examImages.set(entry.id, photos);
+    state.exams.push(entry);
+  }
+  for (const file of all.filter(f => !photos.includes(f))) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const entry = { id: newId(), name: file.name, pages: 0, chars: 0, scanned: [], status: 'lädt', text: '', subject };
+    state.exams.push(entry); renderExamPanel();
+    try {
+      let units, doc = null;
+      if (ext === 'pdf') ({ units, doc } = await readPdf(file));
+      else if (ext === 'pptx') units = await parsePptx(file);
+      else if (ext === 'docx') units = await parseDocx(file);
+      else if (ext === 'txt' || ext === 'md') units = splitText(await file.text(), 'Abschnitt');
+      else if (ext === 'pages') throw new Error('Apple-Pages-Dateien kann der Browser nicht lesen. Exportiere sie in Pages als PDF.');
+      else if (ext === 'heic') throw new Error('HEIC-Fotos kann der Browser nicht lesen. Exportiere sie als JPG.');
+      else throw new Error('Dateityp nicht unterstützt. Erlaubt sind PDF, Fotos (JPG, PNG), PPTX, DOCX, TXT und MD.');
+      entry.pages = units.length;
+      entry.text = units.map(u => `--- ${u.label.replace(/^Folie/, 'Seite')} ---\n${u.text}`).join('\n\n');
+      entry.chars = units.reduce((a, u) => a + u.text.length, 0);
+      entry.scanned = doc ? units.filter(u => u.text.length < 80).map(u => u.num) : [];
+      if (doc) examDocs.set(entry.id, doc);
+      entry.status = 'ok';
+    } catch (err) {
+      entry.status = 'error';
+      entry.error = (err && err.message) || 'Die Datei konnte nicht gelesen werden.';
+    }
+    saveExams(); renderExamPanel();
+  }
+  saveExams(); renderExamPanel();
+}
+function removeExam(id) {
+  state.exams = state.exams.filter(e => e.id !== id);
+  examDocs.delete(id);
+  examImages.delete(id);
+  saveExams(); renderExamPanel();
+}
+function examStylePrompt(text, nImages, subject, imageNote) {
+  return `Du analysierst Altklausuren aus einem Psychologie-Studium, um ihr Prüfungsformat für Übungsklausuren genau nachzubilden. Beschreibe Format und Stil, nicht die Inhalte.
+
+FACH: ${subject}
+Alle Dateien sollen Altklausuren dieses Fachs sein. Prüfe das: Gehört eine Datei erkennbar zu einem anderen Fach (z. B. Statistik statt Diagnostik), trage sie in "mismatches" ein und lass sie bei der Analyse weg.
+
+BESTIMME:
+- "shares": Anteile der Aufgabentypen in Prozent (Summe 100): "tf" = Aussagen, die als richtig oder falsch zu bewerten sind; "single" = Auswahlaufgabe mit genau einer richtigen Option; "multi" = Auswahlaufgabe, bei der mehrere Optionen richtig sein können; "open" = offene Fragen oder Rechenaufgaben mit Freitext.
+- "questionCount": typische Anzahl Aufgaben bzw. zu bewertender Aussagen pro Klausur. "durationMin": Bearbeitungszeit in Minuten. "totalPoints": Gesamtpunkte. Jeweils null, wenn nicht erkennbar.
+- "options": Anzahl Antwortoptionen bei Auswahlaufgaben. "correctPerQuestion": wie viele Optionen richtig sein können, z. B. "genau 1" oder "1 bis 4".
+- "tfPenalty": true, wenn falsche Antworten laut Klausur zu Punktabzug führen. "mcScoring": "partial" bei Teilpunkten pro Option, sonst "all".
+- "phrasing": 3–8 typische Aufgabenstämme oder Formulierungen, wörtlich.
+- "features": Besonderheiten, z. B. Aussagen zu R-Outputs, Rechenaufgaben mit Zahlen, Interpretation von Tabellen oder Grafiken, Fallvignetten, Definitionen, Studienbefunde.
+- "level": Schwierigkeitsniveau und geprüfte Denkstufen in einem Satz.
+- "examples": 3–6 repräsentative Aufgaben, gekürzt und möglichst wörtlich, mit Typ und, falls erkennbar, Lösung.
+- "summary": das Prüfungsformat in 2–3 Sätzen.
+- "mismatches": Dateien, die zu einem anderen Fach gehören, mit Grund, z. B. [{"file":"…","reason":"Statistik II: Regression und ANOVA"}]; sonst [].
+Enthält das Material Lösungen, nutze sie, um Antwortformat und Bewertung zu verstehen.${nImages ? `\nZusätzlich sind ${nImages} gescannte Klausurseiten als Bilder angehängt (${imageNote}).` : ''}
+
+AUSGABE: Antworte ausschließlich mit JSON in genau dieser Form:
+{"summary":"…","shares":{"tf":60,"single":0,"multi":30,"open":10},"questionCount":40,"durationMin":90,"totalPoints":null,"options":5,"correctPerQuestion":"1 bis 4","tfPenalty":false,"mcScoring":"all","phrasing":["…"],"features":["…"],"level":"…","examples":[{"type":"tf","text":"…","answer":"falsch"}],"mismatches":[]}
+
+ALTKLAUSUREN:
+${text || '(nur Seitenbilder)'}`;
+}
+function normalizeStyle(r, sources, subject) {
+  if (!r || typeof r !== 'object') throw { code: 'bad_shape' };
+  const shares = {};
+  let sum = 0;
+  for (const t of ['tf', 'single', 'multi', 'open']) { shares[t] = Math.max(0, Number(r.shares && r.shares[t]) || 0); sum += shares[t]; }
+  if (!sum) { Object.keys(shares).forEach(t => { shares[t] = 25; }); sum = 100; }
+  Object.keys(shares).forEach(t => { shares[t] = Math.round(shares[t] / sum * 100); });
+  const num = (v, lo, hi) => { const n = Number(v); return v != null && Number.isFinite(n) && n >= lo && n <= hi ? Math.round(n) : null; };
+  const strs = (a, n, len) => (Array.isArray(a) ? a : []).map(x => String(x == null ? '' : x).trim()).filter(Boolean).slice(0, n).map(x => x.slice(0, len));
+  return {
+    summary: String(r.summary || '').trim().slice(0, 700),
+    shares,
+    questionCount: num(r.questionCount, 3, 150),
+    durationMin: num(r.durationMin, 10, 300),
+    totalPoints: num(r.totalPoints, 1, 1000),
+    options: num(r.options, 2, 8) || 5,
+    correctPerQuestion: String(r.correctPerQuestion || '').trim().slice(0, 40),
+    tfPenalty: r.tfPenalty === true,
+    mcScoring: r.mcScoring === 'partial' ? 'partial' : 'all',
+    phrasing: strs(r.phrasing, 8, 220),
+    features: strs(r.features, 8, 220),
+    level: String(r.level || '').trim().slice(0, 300),
+    examples: (Array.isArray(r.examples) ? r.examples : []).filter(x => x && x.text).slice(0, 6).map(x => ({ type: QTYPE_LABEL[x.type] ? x.type : 'tf', text: String(x.text).trim().slice(0, 700), answer: String(x.answer == null ? '' : x.answer).trim().slice(0, 300) })),
+    mismatches: (Array.isArray(r.mismatches) ? r.mismatches : []).filter(x => x && x.file).slice(0, 20).map(x => ({ file: String(x.file).slice(0, 200), reason: String(x.reason || '').slice(0, 200) })),
+    sources,
+    subject,
+    created: new Date().toISOString(),
+  };
+}
+const examImages = new Map(); // exam id -> photo files, this session only
+const examSubjectOf = e => e.subject || 'Allgemein';
+function currentSubject() {
+  return $('#exam-subject').value.trim() || $('#course').value.trim() || 'Allgemein';
+}
+const currentStyle = () => state.examStyles[currentSubject()] || null;
+let examBusy = false;
+async function analyzeExams() {
+  const msg = $('#exam-msg'), btn = $('#exam-analyze');
+  const subject = currentSubject();
+  const exams = state.exams.filter(e => e.status === 'ok' && examSubjectOf(e) === subject);
+  msg.className = 'hint';
+  if (!exams.length) { msg.textContent = `Lade zuerst mindestens eine Altklausur für „${subject}“ hoch.`; return; }
+  if (!hasKey()) { msg.textContent = errText({ code: 'no_key' }); focusKey(); return; }
+  if (examBusy) return;
+  // Text up to about 150,000 characters, shared between the exams.
+  const budget = Math.floor(150000 / exams.length);
+  const text = exams.filter(e => e.text).map(e => `=== ${e.name} ===\n${e.text.length > budget ? e.text.slice(0, budget) + '\n[… gekürzt]' : e.text}`).join('\n\n');
+  // Scanned pages go to Claude as images, a few per exam in turn, up to the per-request limit.
+  const maxImg = Math.min(caps.imageMax || 0, 20);
+  const queue = exams.filter(e => e.scanned && e.scanned.length && (examDocs.has(e.id) || examImages.has(e.id)))
+    .map(e => ({ name: e.name, doc: examDocs.get(e.id), photos: examImages.get(e.id), pages: e.scanned.slice() }));
+  const picks = [];
+  while (picks.length < maxImg && queue.some(q => q.pages.length)) for (const q of queue) if (q.pages.length && picks.length < maxImg) picks.push({ name: q.name, doc: q.doc, photos: q.photos, num: q.pages.shift() });
+  const unreadable = exams.reduce((a, e) => a + (e.scanned ? e.scanned.length : 0), 0) - picks.length;
+  if (text.replace(/---[^\n]*---|===[^\n]*===|\s/g, '').length < 200 && !picks.length) {
+    msg.textContent = 'In den Altklausuren ist kein lesbarer Text. Lade gescannte PDFs in dieser Sitzung neu hoch, damit Claude die Seitenbilder lesen kann.';
+    return;
+  }
+  examBusy = true; btn.disabled = true;
+  msg.textContent = picks.length ? `Claude analysiert die Altklausuren (mit ${picks.length} Seitenbildern) …` : 'Claude analysiert die Altklausuren …';
+  try {
+    const images = [], labels = [];
+    for (const pk of picks) {
+      const b = pk.doc ? await drawPage(pk.doc, pk.num, 1100) : await shrinkJpeg(pk.photos[pk.num - 1], 1200);
+      if (b) { images.push(b); labels.push(pk.name); }
+    }
+    // Tell Claude which file each image comes from, so it can name exams from another subject.
+    const imageNote = labels.map((n, i) => `Bild ${i + 1}: ${n}`).join('; ');
+    const res = await askJSON(examStylePrompt(text, images.length, subject, imageNote), { tier: 'complex', effort: 'medium', images });
+    state.examStyles[subject] = normalizeStyle(res, exams.map(e => e.name), subject);
+    saveExams(); renderExamPanel();
+    msg.textContent = 'Klausurstil erkannt.' + (unreadable > 0 ? ` ${unreadable} gescannte Seiten wurden nicht gelesen (Datei in dieser Sitzung neu laden oder weniger Klausuren auf einmal).` : '');
+  } catch (e) {
+    msg.className = 'hint msg err'; msg.textContent = errText(e);
+  } finally { examBusy = false; btn.disabled = false; }
+}
+function renderExamPanel() {
+  const subject = currentSubject();
+  const subjects = Array.from(new Set([...state.exams.map(examSubjectOf), ...Object.keys(state.examStyles)])).sort((a, b) => a.localeCompare(b, 'de'));
+  fill($('#exam-subjects'), ...subjects.map(x => el('option', { value: x })));
+  const others = subjects.filter(x => x !== subject);
+  const oth = $('#exam-others');
+  oth.hidden = !others.length;
+  fill(oth, others.length ? 'Weitere Fächer: ' : null, ...others.flatMap((x, i) => [i ? ' · ' : null, el('button', { type: 'button', class: 'btn small ghost', onclick: () => { $('#exam-subject').value = x; store.set('examSubject', x); renderExamPanel(); } }, `${x} (${state.exams.filter(e => examSubjectOf(e) === x).length})`)]));
+  fill($('#exam-list'), ...state.exams.filter(e => examSubjectOf(e) === subject).map(e => {
+    let meta, cls = 'file-meta';
+    if (e.status === 'lädt') meta = 'wird gelesen …';
+    else if (e.status === 'error') { meta = e.error; cls += ' err'; }
+    else {
+      meta = `${e.pages} ${e.pages === 1 ? 'Seite' : 'Seiten'} · ${Math.round(e.chars / 100) / 10}k Zeichen`;
+      if (e.photos) meta = `${e.pages} ${e.pages === 1 ? 'Foto' : 'Fotos'}`;
+      if (e.scanned && e.scanned.length) {
+        const live = examDocs.has(e.id) || examImages.has(e.id);
+        const what = e.photos ? 'Fotos' : `${e.scanned.length} gescannte Seiten`;
+        if (live) meta += e.photos ? ', Claude liest die Bilder' : ` · ${what}, Claude liest die Bilder`;
+        else { meta += ` · ${e.photos ? '' : what + ': '}Datei neu laden, damit Claude sie lesen kann`; cls += ' warn'; }
+      }
+    }
+    return el('li', { class: 'file' },
+      el('span', { class: 'file-name', text: e.name }),
+      el('span', { class: cls, text: meta }),
+      e.status === 'lädt' ? null : el('button', { type: 'button', class: 'btn small ghost', 'aria-label': e.name + ' entfernen', onclick: () => removeExam(e.id) }, 'Entfernen'));
+  }));
+  const st = state.examStyles[subject] || null;
+  $('#exam-status').textContent = st ? `Klausurstil für ${subject} erkannt` : '';
+  const cb = $('#q-examstyle');
+  cb.disabled = !st;
+  if (!st) cb.checked = false;
+  $('#q-examstyle-hint').textContent = st ? `Fach: ${subject}. Aufgabentypen, Formulierungen und Niveau folgen dessen Altklausuren.` : `Für „${subject}“ gibt es noch keinen Klausurstil. Lade oben Altklausuren hoch und lass ihn erkennen.`;
+  const box = $('#exam-profile');
+  box.hidden = !st;
+  if (!st) { fill(box); return; }
+  const shares = Object.entries(st.shares).filter(([, v]) => v > 0).map(([t, v]) => `${QTYPE_LABEL[t]} ${v} %`).join(' · ');
+  const scope = [st.questionCount ? `${st.questionCount} Aufgaben` : null, st.durationMin ? `${st.durationMin} Minuten` : null, st.totalPoints ? `${st.totalPoints} Punkte` : null].filter(Boolean).join(' · ') || 'nicht angegeben';
+  const scoring = [`${st.options} Antwortoptionen${st.correctPerQuestion ? ', davon ' + st.correctPerQuestion + ' richtig' : ''}`, st.tfPenalty ? 'Punktabzug für falsche Antworten' : 'kein Punktabzug', st.mcScoring === 'partial' ? 'Teilpunkte' : 'alles oder nichts'].join(' · ');
+  const item = (dt, dd) => el('div', {}, el('dt', { text: dt }), el('dd', { text: dd }));
+  fill(box,
+    el('h3', { text: `Erkannter Klausurstil: ${subject}` }),
+    st.mismatches && st.mismatches.length ? el('div', { class: 'notice' }, el('b', { text: 'Passt vermutlich nicht zu diesem Fach und wurde nicht berücksichtigt:' }), el('ul', {}, ...st.mismatches.map(m => el('li', { text: `${m.file}${m.reason ? ' – ' + m.reason : ''}` })))) : null,
+    st.summary ? el('p', { text: st.summary }) : null,
+    el('dl', { class: 'profile-grid' }, item('Aufgabentypen', shares), item('Umfang', scope), item('Bewertung', scoring), item('Niveau', st.level || '–')),
+    st.phrasing.length ? el('div', {}, el('span', { class: 'lbl', text: 'Typische Formulierungen' }), el('ul', {}, ...st.phrasing.map(x => el('li', { text: '„' + x + '“' })))) : null,
+    st.features.length ? el('div', {}, el('span', { class: 'lbl', text: 'Besonderheiten' }), el('ul', {}, ...st.features.map(x => el('li', { text: x })))) : null,
+    st.examples.length ? el('details', { class: 'method' }, el('summary', { text: `Beispielaufgaben aus den Altklausuren (${st.examples.length})` }), el('ul', {}, ...st.examples.map(x => el('li', { text: `[${QTYPE_LABEL[x.type]}] ${x.text}${x.answer ? ' → ' + x.answer : ''}` })))) : null,
+    el('p', { class: 'hint', text: 'Erkannt aus: ' + st.sources.join(', ') }),
+    el('div', { class: 'actions' },
+      el('button', { type: 'button', id: 'mock-exam', class: 'btn primary', onclick: startMockExam }, 'Probeklausur erstellen'),
+      el('span', { class: 'hint', text: mockExamHint(st) }),
+      el('button', { type: 'button', class: 'btn small ghost', onclick: e => armConfirm(e.currentTarget, 'Wirklich löschen?', () => { delete state.examStyles[subject]; saveExams(); renderExamPanel(); }) }, 'Klausurstil löschen')));
 }
 
 /* ---------- Tabs ---------- */
@@ -2155,6 +2500,7 @@ function restoreSettings() {
     if (co.lang) $('#opt-lang').value = co.lang;
     if (co.tier) $('#opt-tier').value = co.tier;
     $('#opt-coverage').checked = co.coverage !== false;
+    $('#opt-formula').checked = co.formula !== false;
     $('#card-req').value = co.req || '';
   }
   const qo = store.get('quizOpts', null);
@@ -2167,7 +2513,9 @@ function restoreSettings() {
     if (qo.mode) $('#q-mode').value = qo.mode;
     if (qo.tier) $('#q-tier').value = qo.tier;
     $('#quiz-req').value = qo.req || '';
+    $('#q-examstyle').checked = !!qo.examStyleOn;
   }
+  $('#exam-subject').value = store.get('examSubject', '') || '';
   const dn = store.get('deckName', '');
   if (dn) { $('#deck-name').value = dn; $('#deck-name').dataset.touched = '1'; } else syncDeckName();
 }
@@ -2209,7 +2557,15 @@ function bind() {
     $('#view-karten').addEventListener(t, e => { if (e.target.closest('#card-list, #deck-name, #card-search')) return; saveCardSettings(); });
     $('#quiz-setup').addEventListener(t, e => { if (e.target.id !== 'quiz-load') saveQuizSettings(); });
   });
-  $('#gen-quiz').addEventListener('click', generateQuiz);
+  $('#gen-quiz').addEventListener('click', () => generateQuiz());
+  const xdrop = $('#exam-drop');
+  $('#exam-input').addEventListener('change', e => { addExams(e.target.files); e.target.value = ''; });
+  ['dragenter', 'dragover'].forEach(t => xdrop.addEventListener(t, e => { e.preventDefault(); xdrop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => xdrop.addEventListener(t, e => { e.preventDefault(); xdrop.classList.remove('over'); }));
+  xdrop.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length) addExams(e.dataTransfer.files); });
+  $('#exam-analyze').addEventListener('click', analyzeExams);
+  $('#exam-subject').addEventListener('input', e => { store.set('examSubject', e.target.value); renderExamPanel(); });
+  $('#course').addEventListener('input', () => { if (!$('#exam-subject').value.trim()) renderExamPanel(); });
   $('#stop-quiz').addEventListener('click', () => quizCtl && quizCtl.abort());
   $('#start-quiz').addEventListener('click', startQuiz);
   $('#quiz-load').addEventListener('change', e => { if (e.target.files[0]) loadQuizFile(e.target.files[0]); e.target.value = ''; });
@@ -2219,6 +2575,7 @@ function init() {
   bind();
   renderFiles();
   renderDeck();
+  renderExamPanel();
   const hash = (location.hash || '').replace('#', '');
   showTab(hash === 'quiz' || hash === 'karten' ? hash : store.get('tab', 'karten'));
   showQuizView();
@@ -2229,7 +2586,7 @@ function init() {
   idle(() => loadScript(CDN.pdf).then(() => loadScript(CDN.pdfWorker)).then(() => loadScript(CDN.jszip)).catch(() => {}));
   if (state.cards.length) prefetchExportLib();
 }
-window.lernstudio = { state, addFiles, unitText, buildApkg, packageApkg, makeChunks, normalizeCards, normalizeQuestions, cardPrompt, quizPrompt, autoScore };
+window.lernstudio = { state, addFiles, addExams, unitText, buildApkg, packageApkg, makeChunks, normalizeCards, normalizeQuestions, cardPrompt, quizPrompt, autoScore };
 init();
 })();
 </script>

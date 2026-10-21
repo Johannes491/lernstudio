@@ -8,6 +8,10 @@ Aus Vorlesungsfolien werden Anki-Karteikarten und Übungsquizze.
 
 - **Karteikarten:** liest PDF, PowerPoint (.pptx), Word (.docx) und Text. Claude schreibt daraus Karten (Frage – Antwort, Umkehrkarten, Lückentext) mit Folienangabe. Ein zweiter Durchgang sucht Lücken und Dubletten. Der Export ist eine `.apkg`-Datei mit Unterdeck, Schlagwörtern und auf Wunsch dem Folienbild auf der Rückseite.
 - **Quiz:** Wahr/Falsch, Single Choice, Multiple Choice und offene Fragen, mit Begründung zu jeder Antwortoption. Offene Antworten bewertet Claude nach einem Punkteraster. Falsch beantwortete Fragen lassen sich wiederholen oder als Anki-Karten speichern.
+- **Altklausuren:** Pro Fach Altklausuren hochladen (PDF, auch gescannt, Fotos, Word, Text). Claude erkennt das Prüfungsformat und meldet Klausuren, die zu einem anderen Fach gehören. Quizze und Probeklausuren (mit Zeitlimit und Punktabzug wie im Original) folgen dann diesem Stil.
+- **Formel-Modus:** jede Formel als eigene Karte plus Rechenbeispiel.
+
+Mehr: [Bisherige Schritte](SCHRITTE.md) · [Roadmap](ROADMAP.md)
 
 ## Was du brauchst
 

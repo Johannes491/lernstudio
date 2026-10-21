@@ -13,6 +13,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 src = (HERE / "index.html").read_text(encoding="utf-8")
 
 SDK_VERSION = "0.131.0"
+# The same app as a claude.ai artifact; visitors without API credits use it with their Claude plan.
+CLAUDE_AI_URL = "https://claude.ai/artifact/AFmAvNHL7PmobSAQskKrmB"
 CSP = (
     "default-src 'none'; "
     "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
@@ -98,6 +100,7 @@ body = replace(body, '  <div id="env-note" class="notice" role="status" hidden><
       </div>
       <label class="choice"><input type="checkbox" id="key-remember"><span>Auf diesem Gerät merken<small>Nur auf deinem eigenen Gerät. Sonst vergisst der Browser den Schlüssel, wenn du den Tab schließt.</small></span></label>
       <p id="key-msg" class="msg" role="status"></p>
+      <p class="hint">Kein API-Guthaben? Mit einem Konto bei claude.ai kannst du die <a href="__CLAUDE_AI_URL__" target="_blank" rel="noopener noreferrer">Version für claude.ai</a> nutzen. Sie läuft über dein Claude-Abo statt über einen API-Schlüssel.</p>
       <details class="method">
         <summary>Was kostet das?</summary>
         <p>Anthropic rechnet direkt über dein Konto ab, nach verbrauchten Tokens. Grobe Schätzung für eine Vorlesung mit rund 50 Folien: Karteikarten kosten etwa 0,50–1 $ mit „Gründlich“ (Claude Opus 5.5) und 0,25–0,50 $ mit „Schnell“ (Claude Sonnet 5.5), mit Folienbildern etwas mehr. Ein Quiz mit 15 Fragen kostet etwa 0,15–0,45 $. Nach jedem Durchlauf zeigt das Lernstudio die ungefähren Kosten an. Ein Monatslimit in der Console verhindert, dass mehr ausgegeben wird als geplant.</p>
@@ -132,7 +135,8 @@ const API_BASE = undefined; // undefined: the SDK's default, https://api.anthrop
 const MODELS = { complex: 'claude-opus-5-5', default: 'claude-sonnet-5-5' };
 // US dollars per million tokens (input, output): Claude API list prices, October 2026.
 const PRICES = { 'claude-opus-5-5': [4, 20], 'claude-sonnet-5-5': [2, 10], 'claude-opus-5': [5, 25], 'claude-opus-4-8': [5, 25], 'claude-sonnet-5': [2, 10] };
-const caps = { imageMax: 8 };
+// The API accepts many images per request; slide chunks stay at 6-12 slides anyway.
+const caps = { imageMax: 20 };
 const usage = { cost: 0 };
 // Over the API every section of a typical lecture can run at once; the SDK waits and retries
 // on rate limits and overloads by itself (new accounts start with lower limits).
@@ -356,7 +360,7 @@ body = replace(body, """  const img = $('#opt-images');
   img.disabled = !anyPdf;
   if (img.disabled) img.checked = false;
   $('#opt-images-hint').textContent = anyPdf ? 'Liest auch Diagramme, Abbildungen und gescannte Folien. Langsamer und etwas teurer.' : 'Nur für PDFs, die in dieser Sitzung geladen wurden.';""")
-body = replace(body, "  if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }", "  if (!hasKey()) { msg.textContent = errText({ code: 'no_key' }); focusKey(); return; }", 2)
+body = replace(body, "  if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }", "  if (!hasKey()) { msg.textContent = errText({ code: 'no_key' }); focusKey(); return; }", 3)
 body = replace(body, "  if (!caps.sample) { $('#gen-cards-msg').textContent = errText({ code: 'unavailable' }); return; }", "  if (!hasKey()) { $('#gen-cards-msg').textContent = errText({ code: 'no_key' }); focusKey(); return; }")
 
 # cost after each run
@@ -390,7 +394,10 @@ body = replace(body, "function bind() {\n", """function bind() {
   $('#key-forget').addEventListener('click', e => armConfirm(e.currentTarget, 'Wirklich entfernen?', () => { forgetKey(); paintKey(); }));
 """)
 
-if "caps.sample" in body or "caps.downloads" in body or "claude.ai" in body:
+# Text replacements that change lengths come last, after all position-based splicing.
+body = body.replace("__CLAUDE_AI_URL__", CLAUDE_AI_URL)
+
+if any(x in body for x in ("caps.sample", "caps.downloads", "window.claude", "claude.use(", "claude.ai-Link")):
     sys.exit("make_site: claude.ai runtime code left in the site")
 
 # ---------- app icon and manifest (installable on phones) ----------
