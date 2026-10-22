@@ -138,6 +138,7 @@ details.method p{margin-top:6px;max-width:68ch}
 .cell.has{background:var(--accent);border-color:var(--accent)}
 .cell.miss{background:var(--warn-soft);border-color:var(--warn)}
 .cell.empty{opacity:.4;cursor:default}
+.cell.off{opacity:.18;cursor:default;background:var(--surface-2);border-style:dashed}
 .cell.sel{outline:2px solid var(--ink);outline-offset:1px}
 .legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--muted)}
 .legend i{display:inline-block;width:10px;height:13px;border-radius:2px;border:1px solid var(--line);vertical-align:-2px;margin-right:4px}
@@ -255,6 +256,8 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
         <span class="drop-hint">PDF, PowerPoint (.pptx), Word (.docx), Text (.txt, .md)</span>
       </label>
       <ul id="file-list" class="file-list"></ul>
+      <label><span class="lbl">Nur diese Folien</span><input type="text" id="slide-range" placeholder="z. B. 1–16 oder 1–16, 20 (leer = alle)" autocomplete="off"></label>
+      <p id="slide-range-hint" class="hint" role="status"></p>
       <details id="paste-box">
         <summary class="lbl" style="cursor:pointer">Text einfügen</summary>
         <div style="display:grid;gap:8px;margin-top:8px">
@@ -883,6 +886,80 @@ function unitText(u) {
   return b.size ? u.text.split('\n').filter(l => !b.has(l.trim())).join('\n').trim() : u.text;
 }
 function resetMaterialCaches() { boilerCache.clear(); slideCache.clear(); claudeCache.clear(); }
+// Slide limits, binding for cards, coverage check and quizzes. They come from the "Nur diese Folien" field or,
+// if that is empty, from the user's instructions ("die ersten 16 Folien", "Folien 3 bis 10", "Folien 1–3 auslassen").
+const RANGE_DASH = '(?:-|–|—|bis(?:\\s+einschließlich)?)';
+function parseRangeField(text) {
+  const inc = [], exc = [];
+  for (let part of String(text).split(/[,;]/)) {
+    part = part.trim().toLowerCase();
+    if (!part) continue;
+    const not = /^(ohne|nicht|außer)\s+/.test(part);
+    part = part.replace(/^(ohne|nicht|außer)\s+/, '').replace(/^folien?\s+/, '');
+    let m, r = null;
+    if ((m = part.match(new RegExp('^(\\d{1,3})\\s*' + RANGE_DASH + '\\s*(\\d{1,3})$')))) r = [+m[1], +m[2]];
+    else if ((m = part.match(/^ab\s+(\d{1,3})$/))) r = [+m[1], Infinity];
+    else if ((m = part.match(/^bis\s+(\d{1,3})$/))) r = [1, +m[1]];
+    else if ((m = part.match(/^(\d{1,3})$/))) r = [+m[1], +m[1]];
+    else return null;
+    if (r[0] > r[1]) r.reverse();
+    (not ? exc : inc).push(r);
+  }
+  return inc.length || exc.length ? { inc, exc } : null;
+}
+function parseRangeReq(text) {
+  const inc = [], exc = [];
+  const NOT = /auslassen|weglassen|überspring|ignorier|ausnehmen|ausgenommen|\bohne\b|\baußer\b|\bnicht\b|\bkeine?\b/gi;
+  const ONLY = /\b(nur|lediglich|ausschließlich|beschränk|begrenz)/gi;
+  // "Folie 2 auslassen, das war nur eine Wiederholung": the word nearest to the slide number decides, first within its comma part.
+  const intent = (clause, at, len) => {
+    const near = (re, from, to) => { let best = Infinity; for (const w of clause.slice(from, to).matchAll(re)) best = Math.min(best, Math.abs(from + w.index - at)); return best; };
+    const start = clause.lastIndexOf(',', at) + 1, endC = clause.indexOf(',', at + len), end = endC < 0 ? clause.length : endC;
+    for (const [a, b] of [[start, end], [0, clause.length]]) {
+      const n = near(NOT, a, b), o = near(ONLY, a, b);
+      if (n < Infinity || o < Infinity) return n < o ? 'exc' : 'inc';
+    }
+    return '';
+  };
+  for (const clause of String(text).split(/[.;!\n]+/)) {
+    let m;
+    if ((m = clause.match(/\bersten\s+(\d{1,3})\s+(?:Folien|Seiten|Slides)/i))) inc.push([1, +m[1]]);
+    const re = new RegExp('\\b(?:Folien?|Seiten?|Slides?)\\s+(\\d{1,3})\\s*' + RANGE_DASH + '\\s*(\\d{1,3})', 'gi');
+    for (const mm of clause.matchAll(re)) {
+      // "Folien 1–3 auslassen" excludes; "nur Folien 3 bis 10" and a plain range include.
+      (intent(clause, mm.index, mm[0].length) === 'exc' ? exc : inc).push([+mm[1], +mm[2]].sort((a, b) => a - b));
+    }
+    // A single slide counts only with a clear word: "Folie 2 auslassen" or "nur Folie 7", not "die Formel auf Folie 7".
+    for (const mm of clause.matchAll(/\b(?:Folie|Seite|Slide)\s+(\d{1,3})\b(?!\s*(?:-|–|—|bis\b))/gi)) {
+      if (/\b(?:bis|ab)\s+(?:einschließlich\s+)?(?:zur\s+|der\s+)?$/i.test(clause.slice(0, mm.index))) continue;
+      const it = intent(clause, mm.index, mm[0].length);
+      if (it) (it === 'exc' ? exc : inc).push([+mm[1], +mm[1]]);
+    }
+    if ((m = clause.match(/\bbis\s+(?:einschließlich\s+)?(?:zur\s+)?(?:Folie|Seite|Slide)\s+(\d{1,3})/i))) inc.push([1, +m[1]]);
+    if ((m = clause.match(/\bab\s+(?:der\s+)?(?:Folie|Seite|Slide)\s+(\d{1,3})/i))) inc.push([+m[1], Infinity]);
+  }
+  return inc.length || exc.length ? { inc, exc } : null;
+}
+function slideFilter(req) {
+  const field = ($('#slide-range').value || '').trim();
+  if (field) { const f = parseRangeField(field); return f ? Object.assign(f, { src: 'field' }) : null; }
+  const f = parseRangeReq(req || '');
+  return f ? Object.assign(f, { src: 'req' }) : null;
+}
+const inFilter = (u, f) => !f || ((!f.inc.length || f.inc.some(([a, b]) => u.num >= a && u.num <= b)) && !f.exc.some(([a, b]) => u.num >= a && u.num <= b));
+function describeFilter(f) {
+  const r = ([a, b]) => b === Infinity ? 'ab ' + a : a === b ? String(a) : `${a}–${b}`;
+  return [f.inc.length ? 'nur Folien ' + f.inc.map(r).join(', ') : '', f.exc.length ? 'ohne Folien ' + f.exc.map(r).join(', ') : ''].filter(Boolean).join(', ');
+}
+function renderSlideRangeHint() {
+  const hint = $('#slide-range-hint'), field = $('#slide-range').value.trim();
+  const fc = slideFilter($('#card-req').value), fq = slideFilter($('#quiz-req').value);
+  if (field && !fc) { hint.className = 'hint msg err'; hint.textContent = 'Nicht verstanden. Beispiele: 1–16 · 1–16, 20 · ab 5 · ohne 1–3'; return; }
+  hint.className = 'hint';
+  if (field) hint.textContent = `Gilt für Karten, Lückensuche und Quiz: ${describeFilter(fc)}.`;
+  else if (fc || fq) hint.textContent = [fc ? `Aus deinen Karten-Anforderungen: ${describeFilter(fc)}.` : '', fq ? `Aus deinen Quiz-Anforderungen: ${describeFilter(fq)}.` : ''].filter(Boolean).join(' ');
+  else hint.textContent = '';
+}
 function usableUnits(withImages) {
   return state.units.filter(u => unitText(u).length >= 3 || (withImages && pdfDocs.has(u.fileId)));
 }
@@ -1058,8 +1135,9 @@ REGELN:
 - Sprache: ${langRule(o)}
 - Umfang: ${densityRule(o)}
 ${Array.isArray(withImages) ? `- Zu ${withImages.length === 1 ? 'Folie' : 'den Folien'} ${withImages.join(', ')} ist je ein Bild angehängt (in dieser Reihenfolge), weil der ausgelesene Text dort Formeln oder unlesbare Zeichen enthält. Maßgeblich ist das Bild.\n` : withImages ? '- Zu jeder Folie ist ein Bild angehängt, in derselben Reihenfolge wie die Folien im Material. Nutze die Bilder für Diagramme, Abbildungen, Tabellen und Text, der im extrahierten Folientext fehlt.\n' : ''}
-ANFORDERUNGEN DES NUTZERS (haben Vorrang vor den Stilregeln):
+ANFORDERUNGEN DES NUTZERS (haben Vorrang vor allen anderen Regeln, auch vor Vollständigkeit und Umfang):
 ${o.req || '(keine)'}
+Schließen diese Anforderungen den ganzen Ausschnitt aus, antworte nur mit {"skip":true,"reason":"…"}.
 
 ${libraryStyleBlock(o) || STYLE_EXAMPLES}
 
@@ -1286,7 +1364,7 @@ ${formulaRules(o)}REGELN:
 - "slide": die Nummer N aus der Überschrift „=== Datei · Folie N ===“.
 - Sprache: ${langRule(o)}
 
-ANFORDERUNGEN DES NUTZERS (haben Vorrang):
+ANFORDERUNGEN DES NUTZERS (haben Vorrang vor allen anderen Regeln):
 ${o.req || '(keine)'}
 
 KARTENLISTE (ID | Folie | Vorderseite → Rückseite, gekürzt):
@@ -1404,6 +1482,7 @@ function readCardOpts() {
     coverage: $('#opt-coverage').checked,
     libStyle: $('#opt-libstyle').checked && state.library.length > 0,
     req: $('#card-req').value.trim(),
+    filter: slideFilter($('#card-req').value),
   };
 }
 function saveCardSettings() {
@@ -1436,7 +1515,7 @@ function scheduleDeckRender() {
   deckTimer = setTimeout(() => { deckTimer = 0; sortCards(); renderDeck(true); paintCardProgress(); }, 300);
 }
 async function runCardJob(job, total, o) {
-  job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0;
+  job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0; job.skip = null;
   state.cards = state.cards.filter(c => c.job !== job.key);
   paintCardProgress(); scheduleDeckRender();
   try {
@@ -1445,6 +1524,7 @@ async function runCardJob(job, total, o) {
     const res = await streamItems(cardPrompt(job.chunk, job.idx, total, o, o.images ? !!images : some ? some.nums : false), {
       tier: o.tier, effort: EFFORT.cards, signal: cardCtl.signal, images,
       onItem: r => {
+        if (r.skip) { job.skip = String(r.reason || 'laut deinen Anforderungen').slice(0, 120); return; }
         const c = normalizeCards([r], job.chunk, o, false)[0];
         if (!c) return;
         c.job = job.key; state.cards.push(c);
@@ -1452,8 +1532,8 @@ async function runCardJob(job, total, o) {
         scheduleDeckRender();
       },
     });
-    if (!job.n) throw { code: 'bad_shape' };
-    job.status = 'fertig'; job.done = job.n + ' Karten' + (res.truncated ? ' (gekürzt, Lückensuche ergänzt den Rest)' : '');
+    if (!job.n && !job.skip) throw { code: 'bad_shape' };
+    job.status = 'fertig'; job.done = !job.n ? 'übersprungen: ' + job.skip : job.n + ' Karten' + (res.truncated ? ' (gekürzt, Lückensuche ergänzt den Rest)' : '');
   } catch (e) {
     // Cards that streamed in before a failure are complete and stay; a refusal withdraws them.
     if (e && e.code === 'refused') state.cards = state.cards.filter(c => c.job !== job.key);
@@ -1484,8 +1564,8 @@ async function generateCards() {
   const per = o.density === 'maximal' ? 6 : o.density === 'kompakt' ? 12 : 8;
   const maxChars = o.density === 'maximal' ? 5000 : o.density === 'kompakt' ? 12000 : 7000;
   const maxUnits = o.images ? Math.max(1, Math.min(per, caps.imageMax)) : per;
-  const chunks = makeChunks(usableUnits(o.images), maxChars, maxUnits);
-  if (!chunks.length) { msg.textContent = 'Im Material wurde kein Text gefunden. Aktiviere „Folienbilder mitsenden“ für gescannte PDFs.'; return; }
+  const chunks = makeChunks(usableUnits(o.images).filter(u => inFilter(u, o.filter)), maxChars, maxUnits);
+  if (!chunks.length) { msg.textContent = o.filter ? `In der Auswahl (${describeFilter(o.filter)}) ist kein Material.` : 'Im Material wurde kein Text gefunden. Aktiviere „Folienbilder mitsenden“ für gescannte PDFs.'; return; }
   const t0 = Date.now();
   state.cards = []; saveCards(); renderDeck();
   cardJobs = chunks.map((chunk, idx) => ({ kind: 'gen', key: 'g' + idx + '-' + t0, chunk, idx, label: chunkLabel(chunk), status: 'wartet', opts: o }));
@@ -1514,6 +1594,7 @@ async function resumeCards() {
 async function continueCards() {
   const o = cardRun.opts, msg = $('#gen-cards-msg');
   const started = Date.now();
+  if (o.filter) msg.textContent = `Auswahl: ${describeFilter(o.filter)}${o.filter.src === 'req' ? ' (aus deinen Anforderungen)' : ''}.`;
   const todo = cardJobs.filter(j => j.status !== 'fertig');
   cardCtl = new AbortController();
   paintCardProgress(); setCardBusy(true); prefetchExportLib();
@@ -1539,7 +1620,7 @@ async function runCoverage(fromGenerate) {
   let jobs = run && run.cov && run.cov.length ? run.cov.map(j => ({ kind: 'cov', key: j.key, group: chunkFromRefs(j.refs), label: j.label, status: j.done ? 'fertig' : 'wartet', done: j.doneText || '' })) : null;
   if (!jobs || jobs.some(j => !j.group && j.status !== 'fertig')) {
     // Smaller groups than before, so several checks run in parallel instead of one long one.
-    const groups = makeChunks(usableUnits(false), 16000, 30);
+    const groups = makeChunks(usableUnits(false).filter(u => inFilter(u, o.filter)), 16000, 30);
     const t = Date.now();
     jobs = groups.map((g, i) => ({ kind: 'cov', key: 'c' + i + '-' + t, group: g, label: 'Abdeckung prüfen · ' + chunkLabel(g), status: 'wartet' }));
     if (run) { run.cov = jobs.map(j => ({ key: j.key, label: j.label, refs: j.group.units.map(unitRef), done: false })); saveCardRun(); }
@@ -1622,10 +1703,15 @@ function renderCoverage() {
   const files = state.files.filter(f => f.status === 'ok' && state.units.some(u => u.fileId === f.id));
   if (!files.length) { fill(wrap); return; }
   let content = 0, covered = 0;
+  const sel = slideFilter($('#card-req').value);
   const blocks = files.map(f => {
     const units = state.units.filter(u => u.fileId === f.id);
     const cells = units.map(u => {
       const n = counts.get(f.id + ':' + u.num) || 0;
+      if (!inFilter(u, sel) && !n) {
+        const label = `${u.label}: nicht ausgewählt`;
+        return el('button', { type: 'button', class: 'cell off', title: label, 'aria-label': label, disabled: true });
+      }
       const empty = unitText(u).length < 20 && !n;
       if (!empty) { content++; if (n) covered++; }
       const cls = 'cell ' + (n ? 'has' : empty ? 'empty' : 'miss') + (view.slide === f.id + ':' + u.num ? ' sel' : '');
@@ -1636,9 +1722,9 @@ function renderCoverage() {
     return el('div', { class: 'cov-file' }, el('span', { class: 'cov-label', text: f.name }), el('div', { class: 'cells' }, cells));
   });
   fill(wrap, 
-    el('div', { class: 'panel-head' }, el('h3', { text: 'Folienabdeckung' }), el('span', { class: 'mono muted', text: `${covered}/${content} Inhaltsfolien mit Karte` })),
+    el('div', { class: 'panel-head' }, el('h3', { text: 'Folienabdeckung' }), el('span', { class: 'mono muted', text: `${covered}/${content} ${sel ? 'ausgewählte ' : ''}Inhaltsfolien mit Karte` })),
     ...blocks,
-    el('div', { class: 'legend' }, el('span', {}, el('i', { class: 'has' }), 'hat Karten'), el('span', {}, el('i', { class: 'miss' }), 'ohne Karte'), el('span', {}, el('i', {}), 'kaum Text'), el('span', { text: 'Foliennummer = Seite im PDF. Klick auf eine Folie filtert die Karten.' })));
+    el('div', { class: 'legend' }, el('span', {}, el('i', { class: 'has' }), 'hat Karten'), el('span', {}, el('i', { class: 'miss' }), 'ohne Karte'), el('span', {}, el('i', {}), 'kaum Text'), sel ? el('span', { text: `Auswahl: ${describeFilter(sel)}` }) : null, el('span', { text: 'Foliennummer = Seite im PDF. Klick auf eine Folie filtert die Karten.' })));
 }
 function filteredCards() {
   const q = view.search.toLowerCase();
@@ -1948,6 +2034,7 @@ function readQuizOpts() {
     tier: $('#q-tier').value,
     req: $('#quiz-req').value.trim(),
     examStyleOn: $('#q-examstyle').checked,
+    filter: slideFilter($('#quiz-req').value),
   };
 }
 // Quiz options that follow a recognized exam style: its task types, their shares and its number of options.
@@ -2026,7 +2113,7 @@ AUSSAGENBLOCK ("block"):
 - Jede Aussage ist für sich richtig oder falsch. Pro Aufgabe dürfen keine bis alle Aussagen richtig sein; variiere die Anzahl zwischen den Aufgaben.
 - Falsche Aussagen enthalten typische Verwechslungen, falsche Zahlen oder falsche Schlussfolgerungen. "why": warum die Aussage richtig oder falsch ist, bei Zahlen mit Rechenweg.
 
-ANFORDERUNGEN DES NUTZERS (haben Vorrang):
+ANFORDERUNGEN DES NUTZERS (haben Vorrang vor allen anderen Regeln):
 ${o.req || '(keine)'}
 
 AUSGABE: Eine Frage pro Zeile als eigenständiges JSON-Objekt (JSON Lines), ohne umschließendes Array, ohne Codeblock, ohne weiteren Text und ohne Zeilenumbruch innerhalb einer Frage. Nur die angeforderten Typen, in diesen Formen:
@@ -2200,11 +2287,11 @@ async function generateQuiz(override) {
   if (!state.units.length) { msg.textContent = 'Lade zuerst links Vorlesungsmaterial.'; return; }
   if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }
   // Split into at least as many parts as calls can run at once (each part gets 4 or more questions).
-  const units = usableUnits(false);
+  const units = usableUnits(false).filter(u => inFilter(u, o.filter));
   const total = units.reduce((a, u) => a + unitText(u).length + 60, 0);
   const parts = Math.max(1, Math.ceil(total / 40000), Math.min(POOL, Math.floor(o.count / 4)));
   const chunks = makeChunks(units, Math.ceil(total / parts) + 1, 1000);
-  if (!chunks.length) { msg.textContent = 'Im Material wurde kein Text gefunden.'; return; }
+  if (!chunks.length) { msg.textContent = o.filter ? `In der Auswahl (${describeFilter(o.filter)}) ist kein Material.` : 'Im Material wurde kein Text gefunden.'; return; }
   const quotas = largestRemainder(o.count, chunks.map(c => c.chars));
   const typeCounts = largestRemainder(o.count, o.types.map(t => o.typeWeights ? o.typeWeights[t] || 0 : 1));
   const slots = shuffle(o.types.flatMap((t, i) => Array(typeCounts[i]).fill(t)));
@@ -2349,7 +2436,7 @@ ZU JEDER VORLAGE SCHREIBST DU GENAU EINE NEUE AUFGABE:
 REGELN DER KLAUSUR:
 ${(o.rules && o.rules.length ? o.rules : st.rules || []).map(r => '- ' + r).join('\n') || '- (keine angegeben)'}
 
-ANFORDERUNGEN DES NUTZERS (haben Vorrang):
+ANFORDERUNGEN DES NUTZERS (haben Vorrang vor allen anderen Regeln):
 ${o.req || '(keine)'}
 
 AUSGABE: Eine Aufgabe pro Zeile als eigenständiges JSON-Objekt (JSON Lines) in der Reihenfolge der Vorlagen, ohne Codeblock, ohne weiteren Text und ohne Zeilenumbruch innerhalb eines Objekts (Zeilenumbrüche im Material als \\n). "task" ist die Nummer der Vorlage.
@@ -3002,6 +3089,7 @@ function showTab(name) {
 
 /* ---------- Init ---------- */
 function restoreSettings() {
+  $('#slide-range').value = store.get('slideRange', '') || '';
   const meta = store.get('meta', {});
   $('#course').value = meta.course || '';
   $('#lecture').value = meta.lecture || '';
@@ -3044,6 +3132,8 @@ function bind() {
   ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
   drop.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
   $('#paste-add').addEventListener('click', addPasted);
+  $('#slide-range').addEventListener('input', e => { store.set('slideRange', e.target.value); renderSlideRangeHint(); renderCoverage(); });
+  ['card-req', 'quiz-req'].forEach(id => $('#' + id).addEventListener('input', () => { renderSlideRangeHint(); if (id === 'card-req') renderCoverage(); }));
   $('#mat-clear').addEventListener('click', e => armConfirm(e.currentTarget, 'Wirklich leeren?', () => { state.files = []; state.units = []; pdfDocs.clear(); resetMaterialCaches(); saveMaterial(); renderFiles(); updateImageOptions(); renderDeck(); cardRun = null; quizRun = null; saveCardRun(); saveQuizRun(); renderCardResume(); renderQuizResume(); }));
   ['course', 'lecture'].forEach(id => $('#' + id).addEventListener('input', () => { saveMeta(); syncDeckName(); }));
   $('#deck-name').addEventListener('input', e => { e.target.dataset.touched = '1'; store.set('deckName', e.target.value); });
@@ -3105,6 +3195,7 @@ function init() {
   renderFiles();
   renderLibrary();
   renderDeck();
+  renderSlideRangeHint();
   renderExamPanel();
   renderCardResume();
   renderQuizResume();
