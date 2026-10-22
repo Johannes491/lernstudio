@@ -79,6 +79,13 @@ button,input,select,textarea{font:inherit;color:inherit}
 .tabs{display:inline-flex;background:var(--surface-2);border-radius:10px;padding:4px;gap:4px}
 .tabs button{border:0;background:transparent;padding:8px 18px;border-radius:7px;font-weight:600;cursor:pointer;color:var(--muted)}
 .tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.plan-week{margin:14px 0 4px;font-size:13px;color:var(--muted);font-weight:700}
+.plan-day{display:grid;grid-template-columns:7.5em minmax(0,1fr) auto;gap:4px 12px;padding:8px 10px;border-bottom:1px solid var(--line);align-items:start}
+.plan-day.today{background:var(--accent-soft);border-radius:8px}
+.plan-day.over .plan-min{color:var(--bad);font-weight:700}
+.plan-day.exam{background:var(--warn-soft);border-radius:8px;font-weight:700}
+.plan-day ul{margin:0;padding-left:1.1em}
+.plan-min{font-size:12.5px;color:var(--muted);white-space:nowrap}
 
 .notice{border:1px solid var(--warn);background:var(--warn-soft);color:var(--ink);border-radius:var(--r);padding:12px 16px;margin-bottom:16px}
 .resume{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:12px 0 0}
@@ -192,6 +199,21 @@ details.method p{margin-top:6px;max-width:68ch}
 .icard-actions{display:flex;justify-content:flex-end;gap:4px;padding:0 8px 8px}
 .icard-edit{padding:12px;display:grid;gap:10px}
 .icard-edit .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.io-stage{position:relative;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:#fff;user-select:none;-webkit-user-select:none}
+.io-stage img{display:block;width:100%;height:auto}
+.io-wait{padding:36px 12px;text-align:center;color:#56637A;font-size:13.5px}
+.io-layer{position:absolute;inset:0;touch-action:none;cursor:crosshair}
+.io-cand,.io-mask,.io-draw{position:absolute;border-radius:2px}
+.io-cand{border:1px dashed rgba(36,70,166,.45);background:rgba(36,70,166,.05);cursor:pointer}
+.io-cand:hover{background:rgba(36,70,166,.22)}
+.io-mask{background:#FFEBA2;border:1.5px solid #8A7A2C;cursor:pointer;display:flex;align-items:center;justify-content:center;font:700 11px/1 var(--f-mono);color:#5A4E10;overflow:hidden}
+.io-draw{border:2px dashed #E0245E;background:rgba(224,36,94,.12);pointer-events:none}
+.io-view{margin:10px 14px 6px;max-width:560px}
+.io-view .io-layer,.io-view .io-mask{cursor:default}
+.io-view .io-layer{touch-action:auto}
+.io-list{margin:0;padding-left:1.7em;display:grid;gap:6px}
+.io-row{display:flex;gap:6px;align-items:center}
+.io-row input{flex:1;min-width:0}
 .export{border-top:1px solid var(--line);padding-top:16px;display:grid;gap:12px}
 .msg{font-size:14px}
 .msg.err{color:var(--bad)}
@@ -266,6 +288,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
     <nav class="tabs" role="tablist" aria-label="Werkzeug">
       <button type="button" role="tab" id="tab-karten" aria-selected="true" aria-controls="view-karten">Karteikarten</button>
       <button type="button" role="tab" id="tab-quiz" aria-selected="false" aria-controls="view-quiz">Quiz</button>
+      <button type="button" role="tab" id="tab-plan" aria-selected="false" aria-controls="view-plan">Lernplan</button>
     </nav>
   </header>
 
@@ -305,9 +328,9 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
         <label><span class="lbl">Vorlesung</span><input type="text" id="lecture" placeholder="z. B. 03 Klassische Testtheorie" autocomplete="off"></label>
       </div>
       <label class="drop" id="drop">
-        <input type="file" id="file-input" multiple accept=".pdf,.pptx,.docx,.txt,.md">
+        <input type="file" id="file-input" multiple accept=".pdf,.pptx,.docx,.txt,.md,.vtt,.srt">
         <span class="drop-title">Dateien hierher ziehen oder auswählen</span>
-        <span class="drop-hint">PDF, PowerPoint (.pptx), Word (.docx), Text (.txt, .md)</span>
+        <span class="drop-hint">PDF, PowerPoint (.pptx), Word (.docx), Text (.txt, .md), Transkript (.vtt, .srt)</span>
       </label>
       <ul id="file-list" class="file-list"></ul>
       <label><span class="lbl">Nur diese Folien</span><input type="text" id="slide-range" placeholder="z. B. 1–16 oder 1–16, 20 (leer = alle)" autocomplete="off"></label>
@@ -342,6 +365,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
               <label class="choice"><input type="checkbox" checked disabled><span>Frage – Antwort<small>Standard, wie in deinen Decks</small></span></label>
               <label class="choice"><input type="checkbox" id="opt-reverse" checked><span>Umkehrkarten<small>Fachbegriff ↔ Definition in beide Richtungen</small></span></label>
               <label class="choice"><input type="checkbox" id="opt-cloze" checked><span>Lückentext<small>Für Definitionen, Zahlen, Formeln</small></span></label>
+              <label class="choice"><input type="checkbox" id="opt-occlusion" checked><span>Bildverdeckung<small>Beschriftungen in Diagrammen verdecken und abfragen. Braucht „Folienbilder an Claude mitsenden“.</small></span></label>
             </fieldset>
             <label><span class="lbl">Sprache der Karten</span>
               <select id="opt-lang">
@@ -403,6 +427,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
             <div class="deck-tools">
               <input type="search" id="card-search" placeholder="Karten durchsuchen" aria-label="Karten durchsuchen">
               <button type="button" id="add-card" class="btn small">Karte hinzufügen</button>
+              <button type="button" id="add-occlusion" class="btn small" title="Beschriftungen einer PDF-Folie verdecken">Bildverdeckung</button>
               <button type="button" id="run-coverage" class="btn small">Lücken suchen</button>
               <button type="button" id="drop-dupes" class="btn small" hidden>Dubletten entfernen</button>
               <button type="button" id="drop-known" class="btn small" hidden>Schon vorhandene entfernen</button>
@@ -432,6 +457,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
 
       <!-- QUIZ -->
       <section id="view-quiz" role="tabpanel" aria-labelledby="tab-quiz" class="stack" hidden>
+        <div class="panel" id="weak-panel" hidden></div>
         <div class="panel" id="exam-panel">
           <div class="panel-head"><h2>Altklausuren</h2><span id="exam-status" class="hint"></span></div>
           <p class="hint">Jedes Fach bekommt seinen eigenen Klausurstil. Wähle zuerst das Fach und lade dann dessen Altklausuren, Probeklausuren oder Beispielfragen hoch. Claude liest jede Klausur Seite für Seite, auch Grafiken, R-Outputs und ausgefüllte Antwortbögen, und erstellt daraus ihren Bauplan: Aufgaben, Themen, Formulierungen, Lösungen, Punkte und Zeit. Probeklausuren folgen diesem Bauplan mit neuen Aussagen und Zahlen. Quizze im Klausurstil nehmen die Inhalte aus deinem Vorlesungsmaterial.</p>
@@ -515,6 +541,33 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
 
         <div class="panel" id="quiz-run" hidden></div>
         <div class="panel" id="quiz-result" hidden></div>
+      </section>
+
+      <!-- LERNPLAN -->
+      <section id="view-plan" role="tabpanel" aria-labelledby="tab-plan" class="stack" hidden>
+        <div class="panel" id="plan-setup">
+          <div class="panel-head"><h2>Lernplan bis zur Klausur</h2></div>
+          <p class="hint">Jede Lerneinheit lernst du einmal und wiederholst sie nach 1, 3, 7, 14 und 30 Tagen. In der letzten Woche kommen eine Gesamtwiederholung, Probeklausuren und die Wiederholungsbox dazu. Einheiten mit Datum (z. B. aus dem Semesterplan kopiert) plant der Lernplan erst nach dieser Sitzung ein.</p>
+          <div class="grid2">
+            <label><span class="lbl">Fach</span><input type="text" id="plan-subject" autocomplete="off" placeholder="z. B. Diagnostik 1 VL"></label>
+            <label><span class="lbl">Klausurtermin</span><input type="date" id="plan-exam"></label>
+            <label><span class="lbl">Beginn</span><input type="date" id="plan-start"></label>
+            <label><span class="lbl">Minuten pro Lerntag</span><input type="number" id="plan-minutes" min="15" max="600" step="15" value="60"></label>
+          </div>
+          <fieldset><legend>Lerntage</legend><div class="seg" id="plan-days"></div></fieldset>
+          <label><span class="lbl">Lerneinheiten, eine pro Zeile <small class="hint">(optional mit Datum der Sitzung, z. B. „3 26.10. Testtheoretische Modelle I“)</small></span>
+            <textarea id="plan-units" rows="8" placeholder="01 Einführung&#10;02 Wahrscheinlichkeitstheorie&#10;03 Testtheoretische Modelle I 26.10.&#10;…"></textarea>
+          </label>
+          <div class="actions">
+            <button type="button" id="plan-fill" class="btn small ghost">Aus meinen Exporten übernehmen</button>
+            <label class="choice" style="margin:0"><input type="number" id="plan-mocks" min="0" max="4" value="2" style="width:4.5em"><span>Probeklausuren</span></label>
+          </div>
+          <div class="actions">
+            <button type="button" id="plan-make" class="btn primary">Lernplan erstellen</button>
+            <span id="plan-msg" class="hint" role="status"></span>
+          </div>
+        </div>
+        <div class="panel" id="plan-view" hidden></div>
       </section>
     </main>
   </div>
@@ -848,6 +901,8 @@ const state = {
   examStyles: store.get('examStyles', null) || {},
   library: store.get('library', []),
   exportHistory: store.get('exportHistory', []),
+  quizLog: store.get('quizLog', []),
+  reviewBox: store.get('reviewBox', []),
 };
 {
   const old = store.get('examStyle', null);
@@ -881,6 +936,31 @@ function textCheck(raw) {
 }
 function cleanText(s) {
   return plainMath(s).replace(/[\uE000-\uF8FF]/g, '•').replace(/\u00a0/g, ' ').replace(/[ \t\f\v]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+// Lecture transcripts (Zoom, Panopto, Teams as VTT or SRT): timestamps and speaker tags go,
+// the spoken text is grouped into 5-minute sections ("Min. 05–10") so cards can point to a place in the recording.
+function parseCaptions(text) {
+  const cues = [];
+  for (const block of String(text).replace(/\r/g, '').split(/\n{2,}/)) {
+    const lines = block.split('\n').filter(l => l.trim());
+    const ti = lines.findIndex(l => l.includes('-->'));
+    if (ti < 0) continue;
+    const m = lines[ti].match(/(?:(\d+):)?(\d{1,2}):(\d{2})[.,]\d{1,3}/);
+    if (!m) continue;
+    const t = lines.slice(ti + 1).join(' ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    if (t) cues.push({ sec: (+m[1] || 0) * 3600 + (+m[2]) * 60 + (+m[3]), t });
+  }
+  if (!cues.length) return null;
+  const slots = new Map();
+  for (const c of cues) {
+    const k = Math.floor(c.sec / 300);
+    const list = slots.get(k) || [];
+    // Auto captions often repeat the previous line.
+    if (list[list.length - 1] !== c.t) list.push(c.t);
+    slots.set(k, list);
+  }
+  const mm = n => String(n).padStart(2, '0');
+  return Array.from(slots.entries()).sort((a, b) => a[0] - b[0]).map(([k, list], i) => ({ kind: 'Abschnitt', num: i + 1, label: `Min. ${mm(k * 5)}–${mm(k * 5 + 5)}`, text: cleanText(list.join(' ')) }));
 }
 function splitText(text, base) {
   const paras = cleanText(text).split(/\n{2,}/);
@@ -975,16 +1055,23 @@ async function parseDocx(file) {
 async function addFiles(list) {
   for (const file of Array.from(list)) {
     const ext = (file.name.split('.').pop() || '').toLowerCase();
-    const entry = { id: state.files.reduce((m, f) => Math.max(m, f.id), 0) + 1, name: file.name, ext, count: 0, chars: 0, empty: 0, status: 'lädt', live: false };
-    state.files.push(entry); renderFiles();
+    const newEntry = () => ({ id: state.files.reduce((m, f) => Math.max(m, f.id), 0) + 1, name: file.name, ext, count: 0, chars: 0, empty: 0, status: 'lädt', live: false });
+    // The same PDF again after a reload takes the place of its saved copy, so its cards get their slide pictures back.
+    const old = ext === 'pdf' ? state.files.find(f => f.ext === 'pdf' && f.name === file.name && f.status === 'ok' && !pdfDocs.has(f.id)) : null;
+    let entry = old ? Object.assign({}, old, { status: 'lädt' }) : newEntry();
+    if (old) state.files[state.files.indexOf(old)] = entry; else state.files.push(entry);
+    renderFiles();
     try {
       let units;
       if (ext === 'pdf') units = await parsePdf(file, entry);
       else if (ext === 'pptx') units = await parsePptx(file);
       else if (ext === 'docx') units = await parseDocx(file);
       else if (ext === 'txt' || ext === 'md') units = splitText(await file.text(), 'Abschnitt');
+      else if (ext === 'vtt' || ext === 'srt') { units = parseCaptions(await file.text()); if (!units) throw new Error('In diesem Transkript wurden keine Zeitmarken mit Text gefunden.'); }
+      else if (['mp3', 'm4a', 'wav', 'aac', 'mp4', 'mov', 'webm', 'mkv'].includes(ext)) throw new Error('Aufnahmen kann der Browser nicht abschreiben. Lade stattdessen das Transkript (.vtt, .srt oder .txt), z. B. aus Panopto, Zoom oder Teams.');
       else if (ext === 'ppt' || ext === 'key' || ext === 'doc') throw new Error('Altes Format. Speichere die Datei als PDF oder .pptx/.docx und lade sie erneut.');
-      else throw new Error('Dateityp nicht unterstützt. Erlaubt sind PDF, PPTX, DOCX, TXT und MD.');
+      else throw new Error('Dateityp nicht unterstützt. Erlaubt sind PDF, PPTX, DOCX, TXT, MD und Transkripte (VTT, SRT).');
+      if (old) state.units = state.units.filter(u => u.fileId !== entry.id);
       units.forEach(u => { u.fileId = entry.id; u.fileName = file.name; });
       entry.count = units.length;
       entry.chars = units.reduce((a, u) => a + u.text.length, 0);
@@ -993,6 +1080,8 @@ async function addFiles(list) {
       state.units.push(...units);
       boilerCache.delete(entry.id);
     } catch (err) {
+      // A failed reload keeps the saved copy; the error shows as an entry of its own.
+      if (old) { pdfDocs.delete(old.id); state.files[state.files.indexOf(entry)] = old; entry = newEntry(); state.files.push(entry); }
       entry.status = 'error';
       entry.error = (err && err.message) || 'Die Datei konnte nicht gelesen werden.';
     }
@@ -1000,6 +1089,7 @@ async function addFiles(list) {
   }
   updateImageOptions();
   suggestNames();
+  renderDeck(true);
 }
 function addPasted() {
   const t = $('#paste').value.trim();
@@ -1073,7 +1163,10 @@ function unitText(u) {
   const b = boilerplate(u.fileId);
   return b.size ? u.text.split('\n').filter(l => !b.has(l.trim())).join('\n').trim() : u.text;
 }
-function resetMaterialCaches() { boilerCache.clear(); slideCache.clear(); claudeCache.clear(); }
+function resetMaterialCaches() {
+  boilerCache.clear(); slideCache.clear(); claudeCache.clear(); boxCache.clear();
+  slideUrls.forEach(p => p.then(u => u && URL.revokeObjectURL(u))); slideUrls.clear();
+}
 // Slide limits, binding for cards, coverage check and quizzes. They come from the "Nur diese Folien" field or,
 // if that is empty, from the user's instructions ("die ersten 16 Folien", "Folien 3 bis 10", "Folien 1–3 auslassen").
 const RANGE_DASH = '(?:-|–|—|bis(?:\\s+einschließlich)?)';
@@ -1175,8 +1268,14 @@ function makeChunks(units, maxChars, maxUnits) {
 }
 function chunkLabel(c) {
   const a = c.units[0], b = c.units[c.units.length - 1];
+  if (a === b) return `${c.fileName} · ${a.label}`;
+  // Transcript sections by time ("Min. 00–15"), slides with gaps listed compactly ("Folien 4, 25–28").
+  const ta = /^Min\. (\d+)–/.exec(a.label), tb = /–(\d+)$/.exec(b.label);
+  if (ta && tb) return `${c.fileName} · Min. ${ta[1]}–${tb[1]}`;
   const plural = { Folie: 'Folien', Seite: 'Seiten', Abschnitt: 'Abschnitte' }[a.kind] || 'Teile';
-  return `${c.fileName} · ${a === b ? a.label : `${plural} ${a.num}–${b.num}`}`;
+  const parts = [];
+  for (const u of c.units) { const last = parts[parts.length - 1]; if (last && u.num === last[1] + 1) last[1] = u.num; else parts.push([u.num, u.num]); }
+  return `${c.fileName} · ${plural} ${parts.map(([x, y]) => x === y ? x : `${x}–${y}`).join(', ')}`;
 }
 // Runs save their chunks as slide references, so a resumed run finds the same slides again (also after the file was loaded anew).
 // File ids are only numbers in load order, so a reference matches by id and name, and by name alone for a file loaded anew.
@@ -1269,6 +1368,7 @@ const COVER_RULES = `INHALTE, DIE ABGEDECKT WERDEN MÜSSEN (soweit im Material v
 - Alles, was als wichtig markiert ist („Merke“, „Zusammenfassung“, „klausurrelevant“, Hervorhebungen, Sprechernotizen)
 - Wiederholungs-, Quiz- und Diskussionsfragen auf den Folien: als Karte übernehmen, wenn die Lösung eindeutig aus dem Material oder aus dem gesicherten Grundwissen der Vorlesung folgt; Wahr/Falsch-Aussagen als „Richtig oder falsch? „…““ mit Lösung und kurzer Begründung. Ist die Lösung nicht eindeutig, die Frage weglassen.
 - Folien „zur eigenen Lektüre“ gehören zum Stoff, soweit ihr Inhalt lesbar ist.
+- Transkripte gesprochener Vorlesungen: Füllwörter, Wiederholungen und Versprecher übergehen; Hinweise der Lehrperson wie „das ist wichtig“ oder „kommt in der Klausur dran“ besonders abdecken.
 Keine Karten zu Titel-, Gliederungs-, Literatur- oder Organisationsfolien ohne Fachinhalt.`;
 const STYLE_EXAMPLES = `BEISPIELE (nur für Form und Stil, nicht für den Inhalt):
 {"type":"basic","front":"Welche Methoden der Reliabilitätsschätzung gibt es? (4)","back":"<ul><li><b>Retest-Reliabilität</b>: derselbe Test zu zwei Zeitpunkten → Stabilität</li><li><b>Paralleltest-Reliabilität</b>: zwei äquivalente Testformen</li><li><b>Testhalbierung</b> (Split-Half): Korrelation zweier Testhälften</li><li><b>Interne Konsistenz</b>: z. B. Cronbachs α</li></ul>","slide":14,"topic":"Reliabilität"}
@@ -1279,6 +1379,16 @@ function typeRules(o) {
 - "basic": Standardkarte (Frage → Antwort). Der Großteil der Karten.
 ${o.reverse ? '- "reverse": Fachbegriff ↔ Definition, wenn beide Richtungen prüfungsrelevant sind (z. B. anatomische Begriffe, Abkürzungen, Fachterminologie). "front" = Begriff, "back" = kurze Definition. Sparsam einsetzen.' : '- Verwende KEINE "reverse"-Karten.'}
 ${o.cloze ? '- "cloze": Lückentext für feste Definitionen, Zahlen, Formeln und Merksätze. "front" enthält den Satz mit {{c1::Lücke}}; mehrere unabhängige Lücken als {{c1::…}}, {{c2::…}}. Pro Lücke ein Schlüsselbegriff, nie halbe Sätze. "back" ist ein optionaler Zusatz oder "".' : '- Verwende KEINE "cloze"-Karten.'}`;
+}
+// Image occlusion only when Claude sees every slide; the labels it names are then looked up on the slide.
+function occlusionRule(o, withImages) {
+  if (!o.occlusion || withImages !== true) return '';
+  return `
+
+BILDVERDECKUNG:
+- Zeigt eine Folie ein beschriftetes Diagramm, Modell, Schema oder eine Abbildung, bei der die Lage der Beschriftungen prüfungsrelevant ist (z. B. Bestandteile eines Modells mit Pfeilen, Achsen und Kurven einer Grafik, Hirnareale), erstelle für diese Folie zusätzlich genau eine Karte {"type":"occlusion","front":"kurze Aufgabe, z. B. Beschrifte das Modell der KTT","labels":["…","…"],"slide":12,"topic":"…"}.
+- "labels": 3–12 Beschriftungen aus dem Diagramm, Zeichen für Zeichen wie im ausgelesenen Folientext (nicht übersetzen, kürzen oder umformulieren). Keine Folienüberschrift, keine ganzen Sätze, keine Quellenangaben.
+- Nicht für reine Text- oder Aufzählungsfolien und nicht für Diagramme, deren Beschriftungen nur im Bild und nicht im ausgelesenen Text stehen. Die übrigen Karten zur Folie schreibst du wie gewohnt.`;
 }
 function formulaRules(o) {
   if (!o.formula) return '';
@@ -1307,7 +1417,7 @@ Ausschnitt: Teil ${idx + 1} von ${total} (${chunkLabel(chunk)}). Erstelle Karten
 
 ${STYLE_RULES}
 
-${typeRules(o)}
+${typeRules(o)}${occlusionRule(o, withImages)}
 
 ${formulaRules(o)}${COVER_RULES}
 
@@ -1467,7 +1577,7 @@ function knownIndex() {
   if (knownIx) return knownIx;
   const entries = [];
   state.library.filter(d => d.status === 'ok').forEach(d => d.fronts.forEach(x => entries.push({ n: x.n, f: x.f, src: 'Deck „' + (x.d || d.deck) + '“' })));
-  state.exportHistory.forEach(h => (h.fronts || []).forEach((n, i) => entries.push({ n, f: (h.labels || [])[i] || n, src: `Lernstudio-Export „${h.deck}“ vom ${h.date}`, guid: h.guids[i] })));
+  state.exportHistory.forEach(h => (h.fronts || []).forEach((n, i) => { if (n) entries.push({ n, f: (h.labels || [])[i] || n, src: `Lernstudio-Export „${h.deck}“ vom ${h.date}`, guid: h.guids[i] }); }));
   const byNorm = new Map(), byTok = new Map();
   entries.forEach((e, i) => {
     e.t = tokensOf(e.n);
@@ -1500,15 +1610,17 @@ function markKnown() {
   for (const c of state.cards) {
     if (c.kv === knownVer) continue;
     c.kv = knownVer;
-    const k = on ? findKnown(c, current) : null;
+    const k = on && c.type !== 'occlusion' ? findKnown(c, current) : null;
     if (k) c.known = { src: k.src, f: k.f, exp: !!k.guid }; else delete c.known;
   }
 }
 // After an export: remember which cards went out, per deck, for "only new cards" and the duplicate check.
 function recordExport(deckName, cards) {
   const d = new Date();
-  state.exportHistory.push({ deck: deckName, course: $('#course').value.trim(), date: `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`, at: d.toISOString(), count: cards.length,
-    guids: cards.map(c => c.guid), fronts: cards.map(c => normFront(c.front)), labels: cards.map(c => stripHtml(c.front).slice(0, 120)) });
+  const notes = cards.flatMap(c => c.type === 'occlusion' ? c.occ.rects.map(r => ({ guid: c.guid + r.id, n: '', l: (r.label || '').slice(0, 120) }))
+    : [{ guid: c.guid, n: normFront(c.front), l: stripHtml(c.front).slice(0, 120) }]);
+  state.exportHistory.push({ deck: deckName, course: $('#course').value.trim(), date: `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`, at: d.toISOString(), count: notes.length,
+    guids: notes.map(x => x.guid), fronts: notes.map(x => x.n), labels: notes.map(x => x.l) });
   while (state.exportHistory.length > 60) state.exportHistory.shift();
   if (!store.set('exportHistory', state.exportHistory)) { state.exportHistory = state.exportHistory.slice(-15); store.set('exportHistory', state.exportHistory); }
   knownChanged();
@@ -1516,7 +1628,7 @@ function recordExport(deckName, cards) {
 function renderExportHistory() {
   const deckName = $('#deck-name').value.trim() || defaultDeckName();
   const exported = new Set(state.exportHistory.filter(h => h.deck === deckName).flatMap(h => h.guids));
-  const fresh = state.cards.filter(c => !c.draft && !exported.has(c.guid)).length;
+  const fresh = state.cards.filter(c => !c.draft && noteGuids(c).some(g => !exported.has(g))).length;
   const row = $('#only-new-row');
   row.hidden = !exported.size;
   if (exported.size) $('#only-new-label').textContent = `Nur neue Karten exportieren (${fresh} von ${state.cards.filter(c => !c.draft).length} noch nicht exportiert)`;
@@ -1528,7 +1640,7 @@ function renderExportHistory() {
     el('ul', {}, ...mine.map(h => el('li', { text: `${h.date}: ${h.deck} · ${h.count} Karten` })))) : null);
 }
 function coveragePrompt(group, cardsInGroup, o) {
-  const list = cardsInGroup.map(c => `${c.id} | ${c.slide || '-'} | ${stripHtml(c.front).slice(0, 140)} → ${stripHtml(c.back).slice(0, 100)}`).join('\n');
+  const list = cardsInGroup.map(c => `${c.id} | ${c.slide || '-'} | ${stripHtml(c.front).slice(0, 140)} → ${c.type === 'occlusion' ? 'Bildverdeckung: ' + c.occ.rects.map(r => r.label).filter(Boolean).join(', ').slice(0, 160) : stripHtml(c.back).slice(0, 100)}`).join('\n');
   return `Du prüfst ein Anki-Deck auf Vollständigkeit für eine Klausur in einem Psychologie-Studium (Ziel: Note 1,0).
 
 ${courseLine()}
@@ -1536,7 +1648,7 @@ Material: ${chunkLabel(group)}
 
 AUFGABE:
 1. Gehe das Material Folie für Folie durch und vergleiche es mit der Kartenliste. Erstelle neue Karten für jeden prüfungsrelevanten Inhalt, der noch NICHT abgedeckt ist. Erstelle keine Karten zu Inhalten, die schon abgedeckt sind.
-2. Nenne in "duplicates" die IDs von Karten ein, die inhaltlich eine andere Karte der Liste wiederholen (jeweils nur die schwächere der beiden).
+2. Nenne in "duplicates" die IDs von Karten ein, die inhaltlich eine andere Karte der Liste wiederholen (jeweils nur die schwächere der beiden). Karten mit „Bildverdeckung:“ fragen die Lage im Diagramm ab und sind nie Dubletten.
 
 ${COVER_RULES}
 
@@ -1661,6 +1773,7 @@ function readCardOpts() {
     reverse: $('#opt-reverse').checked,
     formula: $('#opt-formula').checked,
     cloze: $('#opt-cloze').checked,
+    occlusion: $('#opt-occlusion').checked,
     lang: $('#opt-lang').value,
     tier: $('#opt-tier').value,
     images: $('#opt-images').checked && caps.imageMax > 0,
@@ -1703,6 +1816,7 @@ async function runCardJob(job, total, o) {
   job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0; job.skip = null;
   state.cards = state.cards.filter(c => c.job !== job.key);
   paintCardProgress(); scheduleDeckRender();
+  const run = job.run = (job.run || 0) + 1, pending = [];
   try {
     const some = o.images ? null : await checkImages(job.chunk);
     const images = o.images ? await chunkImages(job.chunk) : some && some.images;
@@ -1710,6 +1824,15 @@ async function runCardJob(job, total, o) {
       tier: o.tier, effort: EFFORT.cards, signal: cardCtl.signal, images,
       onItem: r => {
         if (r.skip) { job.skip = String(r.reason || 'laut deinen Anforderungen').slice(0, 120); return; }
+        if (r.type === 'occlusion') {
+          if (o.occlusion && o.images && images) pending.push(occlusionFromClaude(r, job.chunk).then(c => {
+            if (!c || job.run !== run) return;
+            c.job = job.key; state.cards.push(c);
+            job.n++; job.live = job.n + ' Karten';
+            scheduleDeckRender();
+          }).catch(() => {}));
+          return;
+        }
         const c = normalizeCards([r], job.chunk, o, false)[0];
         if (!c) return;
         c.job = job.key; state.cards.push(c);
@@ -1717,9 +1840,11 @@ async function runCardJob(job, total, o) {
         scheduleDeckRender();
       },
     });
+    await Promise.all(pending);
     if (!job.n && !job.skip) throw { code: 'bad_shape' };
     job.status = 'fertig'; job.done = !job.n ? 'übersprungen: ' + job.skip : job.n + ' Karten' + (res.truncated ? ' (gekürzt, Lückensuche ergänzt den Rest)' : '');
   } catch (e) {
+    await Promise.all(pending);
     // Cards that streamed in before a failure are complete and stay; a refusal withdraws them.
     if (e && e.code === 'refused') state.cards = state.cards.filter(c => c.job !== job.key);
     if (e && e.code === 'cancelled') job.status = 'abgebrochen';
@@ -1823,7 +1948,7 @@ async function runCoverage(fromGenerate) {
         tier: o.tier, effort: EFFORT.coverage, signal: cardCtl.signal,
         onItem: r => {
           if (Array.isArray(r.duplicates)) {
-            r.duplicates.map(String).forEach(id => { if (ids.has(id)) { const c = state.cards.find(x => x.id === id); if (c && !c.dupe) { c.dupe = true; dupes++; } } });
+            r.duplicates.map(String).forEach(id => { if (ids.has(id)) { const c = state.cards.find(x => x.id === id); if (c && !c.dupe && c.type !== 'occlusion') { c.dupe = true; dupes++; } } });
           } else {
             const c = normalizeCards([r], g, o, true)[0];
             if (!c) return;
@@ -1850,7 +1975,7 @@ async function runCoverage(fromGenerate) {
 }
 
 /* ---------- Deck-Ansicht ---------- */
-const TYPE_LABEL = { basic: 'Frage – Antwort', reverse: 'Umkehrkarte', cloze: 'Lückentext' };
+const TYPE_LABEL = { basic: 'Frage – Antwort', reverse: 'Umkehrkarte', cloze: 'Lückentext', occlusion: 'Bildverdeckung' };
 const view = { slide: null, search: '', editing: null };
 function clozeHtml(text, reveal) {
   return text.replace(CLOZE_RE, (m, n, a, hint) => `<span class="cloze">${reveal ? a : '[' + (hint || '…') + ']'}</span>`);
@@ -1859,7 +1984,7 @@ function renderDeck(soft) {
   const has = state.cards.length > 0;
   $('#deck-empty').hidden = has;
   $('#deck-body').hidden = !has;
-  const s = { basic: 0, reverse: 0, cloze: 0 };
+  const s = { basic: 0, reverse: 0, cloze: 0, occlusion: 0 };
   state.cards.forEach(c => { s[c.type] = (s[c.type] || 0) + 1; });
   markKnown();
   const dupes = state.cards.filter(c => c.dupe).length;
@@ -1870,12 +1995,14 @@ function renderDeck(soft) {
     el('span', {}, el('b', { text: s.basic }), ' Frage – Antwort'),
     s.reverse ? el('span', {}, el('b', { text: s.reverse }), ' Umkehr') : null,
     s.cloze ? el('span', {}, el('b', { text: s.cloze }), ' Lückentext') : null,
+    s.occlusion ? el('span', {}, el('b', { text: s.occlusion }), ` Bildverdeckung (${noteCount(state.cards.filter(c => c.type === 'occlusion'))} Anki-Karten)`) : null,
     added ? el('span', {}, el('b', { text: added }), ' ergänzt') : null,
   ] : []));
   $('#drop-dupes').hidden = !dupes;
   $('#drop-dupes').textContent = `Dubletten entfernen (${dupes})`;
   $('#drop-known').hidden = !known;
   $('#drop-known').textContent = `Schon vorhandene entfernen (${known})`;
+  $('#add-occlusion').disabled = !state.files.some(f => pdfDocs.has(f.id));
   renderExportHistory();
   if (!has) return;
   renderCoverage();
@@ -1915,7 +2042,7 @@ function filteredCards() {
   const q = view.search.toLowerCase();
   return state.cards.filter(c => {
     if (view.slide && c.fileId + ':' + c.slide !== view.slide) return false;
-    if (q && !(stripHtml(c.front) + ' ' + stripHtml(c.back) + ' ' + c.topic).toLowerCase().includes(q)) return false;
+    if (q && !(stripHtml(c.front) + ' ' + stripHtml(c.back) + ' ' + c.topic + (c.occ ? ' ' + c.occ.rects.map(r => r.label).join(' ') : '')).toLowerCase().includes(q)) return false;
     return true;
   });
 }
@@ -1928,10 +2055,11 @@ function renderCardList() {
   note.hidden = !parts.length;
   if (parts.length) fill(note, `${list.length} von ${state.cards.length} Karten · ${parts.join(' · ')} `, el('button', { type: 'button', class: 'btn small ghost', onclick: () => { view.slide = null; view.search = ''; $('#card-search').value = ''; renderCoverage(); renderCardList(); } }, 'Filter aufheben'));
   const shown = list.slice(0, 400);
-  fill($('#card-list'), ...shown.map(c => view.editing === c.id ? cardEditor(c) : cardView(c)),
+  fill($('#card-list'), ...shown.map(c => view.editing === c.id ? (c.type === 'occlusion' ? occlusionEditor(c) : cardEditor(c)) : cardView(c)),
     list.length > shown.length ? el('p', { class: 'hint', text: `${list.length - shown.length} weitere Karten ausgeblendet. Nutze Suche oder Folienfilter.` }) : null);
 }
 function cardView(c) {
+  if (c.type === 'occlusion') return occlusionView(c);
   const front = c.type === 'cloze' ? clozeHtml(c.front, false) : c.front;
   const back = c.type === 'cloze' ? clozeHtml(c.front, true) + (c.back ? '<br>' + c.back : '') : c.back;
   return el('article', { class: 'icard' },
@@ -1951,7 +2079,7 @@ function cardView(c) {
 }
 function cardEditor(c) {
   const id = 'ed-' + c.id;
-  const typeSel = el('select', { id: id + '-type' }, ...Object.entries(TYPE_LABEL).map(([v, t]) => el('option', { value: v, selected: v === c.type || null }, t)));
+  const typeSel = el('select', { id: id + '-type' }, ...Object.entries(TYPE_LABEL).filter(([v]) => v !== 'occlusion').map(([v, t]) => el('option', { value: v, selected: v === c.type || null }, t)));
   const front = el('textarea', { id: id + '-front', rows: 2 }); front.value = c.front;
   const back = el('textarea', { id: id + '-back', rows: 5 }); back.value = c.back;
   const slide = el('input', { type: 'number', id: id + '-slide', min: 1 }); slide.value = c.slide || '';
@@ -1987,6 +2115,324 @@ function addCard() {
   const ta = document.getElementById('ed-' + c.id + '-front'); if (ta) ta.focus();
 }
 
+/* ---------- Bildverdeckung ---------- */
+// Text lines of a PDF page with their position as a share of the page (0–1), from pdf.js. They are the click targets
+// in the editor and the places where the labels Claude suggests are looked up.
+const boxCache = new Map();
+function slideBoxes(fileId, num) {
+  const key = fileId + ':' + num;
+  if (!boxCache.has(key)) boxCache.set(key, readBoxes(fileId, num).catch(() => { boxCache.delete(key); return []; }));
+  return boxCache.get(key);
+}
+async function readBoxes(fileId, num) {
+  const doc = pdfDocs.get(fileId);
+  if (!doc || !(num >= 1 && num <= doc.numPages)) return [];
+  const page = await doc.getPage(num);
+  const vp = page.getViewport({ scale: 1 });
+  const tc = await page.getTextContent();
+  page.cleanup();
+  const lines = [];
+  for (const it of tc.items) {
+    const str = typeof it.str === 'string' ? it.str.replace(/\s+/g, ' ') : '';
+    if (!str.trim() || !it.width) continue;
+    const t = window.pdfjsLib.Util.transform(vp.transform, it.transform);
+    const h = Math.hypot(t[2], t[3]), len = Math.hypot(t[0], t[1]);
+    if (!h || !len) continue;
+    const ux = t[0] / len, uy = t[1] / len, vx = t[2] / h, vy = t[3] / h, w = it.width * vp.scale;
+    // From a little below the baseline to the top of the glyphs, also for rotated text.
+    const pts = [[0, -0.25], [w, -0.25], [0, 1], [w, 1]].map(([a, b]) => [t[4] + ux * a + vx * b * h, t[5] + uy * a + vy * b * h]);
+    const box = { str, h, ux, uy, ex: t[4] + ux * w, ey: t[5] + uy * w,
+      x0: Math.min(...pts.map(p => p[0])), y0: Math.min(...pts.map(p => p[1])), x1: Math.max(...pts.map(p => p[0])), y1: Math.max(...pts.map(p => p[1])) };
+    // Pieces of one line that follow each other closely form one label.
+    const prev = lines[lines.length - 1];
+    if (prev && Math.abs(prev.ux - ux) < 0.05 && Math.abs(prev.uy - uy) < 0.05 && Math.abs(prev.h - h) < 0.3 * Math.max(prev.h, h)) {
+      const dx = t[4] - prev.ex, dy = t[5] - prev.ey, along = dx * ux + dy * uy, across = dy * ux - dx * uy;
+      if (Math.abs(across) < 0.3 * h && along > -0.3 * h && along < 0.9 * h) {
+        prev.str += (along > 0.12 * h && !/\s$/.test(prev.str) && !/^\s/.test(str) ? ' ' : '') + str;
+        Object.assign(prev, { ex: box.ex, ey: box.ey, x0: Math.min(prev.x0, box.x0), y0: Math.min(prev.y0, box.y0), x1: Math.max(prev.x1, box.x1), y1: Math.max(prev.y1, box.y1) });
+        continue;
+      }
+    }
+    lines.push(box);
+  }
+  const W = vp.width, H = vp.height;
+  return lines.map(l => {
+    const x = Math.max(0, l.x0 / W), y = Math.max(0, l.y0 / H);
+    return { text: l.str.trim(), flat: Math.abs(l.uy) < 0.05, x, y, w: Math.min(1, l.x1 / W) - x, h: Math.min(1, l.y1 / H) - y };
+  }).filter(b => b.text && b.w > 0.002 && b.h > 0.002);
+}
+// Masks reach a little beyond the text so that no stroke of a letter peeks out.
+const IO_PAD = 0.004;
+function rectOf(b, label) {
+  const x = Math.max(0, b.x - IO_PAD), y = Math.max(0, b.y - IO_PAD);
+  return { id: '', x, y, w: Math.min(1, b.x + b.w + IO_PAD) - x, h: Math.min(1, b.y + b.h + IO_PAD) - y, label };
+}
+function unionBox(bs) {
+  const x = Math.min(...bs.map(b => b.x)), y = Math.min(...bs.map(b => b.y));
+  return { x, y, w: Math.max(...bs.map(b => b.x + b.w)) - x, h: Math.max(...bs.map(b => b.y + b.h)) - y };
+}
+function rectId(rects) {
+  let id;
+  do id = 'r' + Math.random().toString(36).slice(2, 7); while (rects.some(r => r.id === id));
+  return id;
+}
+const covers = (r, b) => {
+  const ix = Math.min(r.x + r.w, b.x + b.w) - Math.max(r.x, b.x), iy = Math.min(r.y + r.h, b.y + b.h) - Math.max(r.y, b.y);
+  return ix > 0 && iy > 0 && ix * iy >= 0.6 * b.w * b.h;
+};
+const boxStyle = r => `left:${r.x * 100}%;top:${r.y * 100}%;width:${r.w * 100}%;height:${r.h * 100}%`;
+const labelKey = s => String(s).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+// Each suggested label is looked up on the slide: as a whole line, as two or three lines in a row (wrapped labels),
+// or as part of a horizontal line. Labels that are not found are left out.
+function findLabels(labels, boxes) {
+  const keys = boxes.map(b => labelKey(b.text)), used = new Set(), rects = [];
+  const stacked = run => run.every((k, i) => {
+    if (!i) return true;
+    const a = boxes[run[i - 1]], b = boxes[k];
+    return b.y - (a.y + a.h) < b.h && Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > -0.02;
+  });
+  for (const label of labels) {
+    const want = labelKey(label);
+    if (!want) continue;
+    const one = keys.findIndex((k, i) => !used.has(i) && k === want);
+    let hit = one >= 0 ? [one] : null;
+    for (let n = 2; !hit && n <= 3; n++) {
+      for (let i = 0; i + n <= keys.length; i++) {
+        const run = Array.from({ length: n }, (_, k) => i + k);
+        if (!run.some(k => used.has(k)) && run.map(k => keys[k]).join('') === want && stacked(run)) { hit = run; break; }
+      }
+    }
+    if (hit) { hit.forEach(k => used.add(k)); rects.push(rectOf(unionBox(hit.map(k => boxes[k])), label)); continue; }
+    const part = want.length >= 3 ? keys.findIndex((k, i) => !used.has(i) && boxes[i].flat && k.length <= want.length * 4 && k.includes(want)) : -1;
+    if (part >= 0) {
+      const b = boxes[part], k = keys[part], at = k.indexOf(want);
+      rects.push(rectOf({ x: b.x + b.w * at / k.length, y: b.y, w: b.w * want.length / k.length, h: b.h }, label));
+    }
+  }
+  return rects;
+}
+async function occlusionFromClaude(r, chunk) {
+  const slide = parseInt(r.slide, 10);
+  if (!chunk.units.some(u => u.num === slide) || !pdfDocs.has(chunk.fileId)) return null;
+  const labels = Array.from(new Set((Array.isArray(r.labels) ? r.labels : []).map(x => String(x == null ? '' : x).replace(/\s+/g, ' ').trim()).filter(Boolean))).slice(0, 15);
+  const rects = findLabels(labels, await slideBoxes(chunk.fileId, slide));
+  if (rects.length < 2) return null;
+  rects.forEach(x => { x.id = rectId(rects); });
+  return { id: newId('k'), guid: newGuid(), type: 'occlusion', front: sanitize(r.front || '') || 'Was gehört an die markierte Stelle?', back: '',
+    fileId: chunk.fileId, fileName: chunk.fileName, slide, topic: String(r.topic || '').replace(/\s+/g, ' ').trim().slice(0, 60), added: false, occ: { mode: 'all', rects } };
+}
+// One Anki note per covered area.
+const noteGuids = c => c.type === 'occlusion' ? c.occ.rects.map(r => c.guid + r.id) : [c.guid];
+const noteCount = cards => cards.reduce((n, c) => n + noteGuids(c).length, 0);
+const mediaBase = deckName => `lernstudio-${tagSlug(deckName.replace(/::/g, '-')).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'deck'}-${hash53(deckName).toString(36).slice(0, 6)}`;
+function ankiNotesOf(c, images) {
+  const quelle = c.fileName ? escapeHtml(c.fileName.replace(/\.[^.]+$/, '')) : '';
+  const folie = c.slide ? String(c.slide) : '';
+  const tags = [tagSlug(c.topic), c.kind === 'formula' ? 'Formel' : c.kind === 'calc' ? 'Rechenaufgabe' : '', c.type === 'occlusion' ? 'Bildverdeckung' : ''].filter(Boolean);
+  if (c.type === 'occlusion') return c.occ.rects.map(r => {
+    const g = c.guid + r.id;
+    return { guid: g, mid: MODEL_IDS.occlusion, tags,
+      values: [`<img src="${images.get('io:' + g + ':q')}">`, `<img src="${images.get('io:' + g + ':a')}">`, escapeHtml(r.label || ''), c.front, c.back || '', quelle, folie] };
+  });
+  const bild = images.has(c.fileId + ':' + c.slide) ? `<img src="${images.get(c.fileId + ':' + c.slide)}">` : '';
+  return [{ guid: c.guid || newGuid(), mid: MODEL_IDS[c.type] || MODEL_IDS.basic, tags, values: [c.front, c.back || '', quelle, folie, bild] }];
+}
+// The slide with the masks drawn in. Front: the asked area red with a question mark (with "all", the others yellow).
+// Back: the asked area open and framed.
+function drawOcclusion(bmp, occ, target, back) {
+  const c = document.createElement('canvas');
+  c.width = bmp.width; c.height = bmp.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(bmp, 0, 0);
+  const lw = Math.max(2, Math.round(c.width / 450));
+  occ.rects.forEach((r, i) => {
+    const x = r.x * c.width, y = r.y * c.height, w = r.w * c.width, h = r.h * c.height;
+    if (i === target && back) { ctx.lineWidth = lw * 1.5; ctx.strokeStyle = '#E0245E'; ctx.strokeRect(x - lw, y - lw, w + 2 * lw, h + 2 * lw); return; }
+    if (i !== target && occ.mode === 'one') return;
+    ctx.fillStyle = i === target ? '#FF8E8E' : '#FFEBA2'; ctx.fillRect(x, y, w, h);
+    ctx.lineWidth = lw; ctx.strokeStyle = i === target ? '#C62828' : '#8A7A2C'; ctx.strokeRect(x, y, w, h);
+    if (i === target) {
+      ctx.fillStyle = '#7A1010'; ctx.font = `700 ${Math.max(10, Math.round(Math.min(h * 0.8, 40)))}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', x + w / 2, y + h / 2);
+    }
+  });
+  return new Promise((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('Ein Bild für die Bildverdeckung ließ sich nicht erstellen.'))), 'image/jpeg', 0.82));
+}
+async function occlusionMedia(cards, deckName, onStep) {
+  const occ = cards.filter(c => c.type === 'occlusion'), out = [];
+  const total = noteCount(occ);
+  let n = 0;
+  for (const c of occ) {
+    const src = await renderSlide(c.fileId, c.slide);
+    if (!src) throw new Error(`Folie ${c.slide} aus ${c.fileName} ließ sich für die Bildverdeckung nicht zeichnen. Lade die PDF links erneut.`);
+    const bmp = await createImageBitmap(src);
+    try {
+      for (const [i, r] of c.occ.rects.entries()) {
+        if (onStep) onStep(`Bildverdeckung ${++n} von ${total} wird gezeichnet …`);
+        const g = c.guid + r.id, stem = `${mediaBase(deckName)}-io-${hash53(g).toString(36)}`;
+        out.push({ key: `io:${g}:q`, name: `${stem}-q.jpg`, blob: await drawOcclusion(bmp, c.occ, i, false) });
+        out.push({ key: `io:${g}:a`, name: `${stem}-a.jpg`, blob: await drawOcclusion(bmp, c.occ, i, true) });
+      }
+    } finally { bmp.close(); }
+  }
+  return out;
+}
+// Slide pictures for the deck view and the editor, kept as object URLs while the material stays loaded.
+const slideUrls = new Map();
+function slideUrl(fileId, num) {
+  const key = fileId + ':' + num;
+  if (!slideUrls.has(key)) slideUrls.set(key, renderSlide(fileId, num).then(b => { if (!b) { slideUrls.delete(key); return null; } return URL.createObjectURL(b); }));
+  return slideUrls.get(key);
+}
+function occlusionView(c) {
+  const n = c.occ.rects.length;
+  const stage = el('div', { class: 'io-stage io-view' }, el('div', { class: 'io-wait', text: pdfDocs.has(c.fileId) ? 'Folie wird geladen …' : 'Das Folienbild erscheint, wenn die PDF links geladen ist.' }));
+  if (pdfDocs.has(c.fileId)) slideUrl(c.fileId, c.slide).then(u => {
+    if (u) fill(stage, el('img', { src: u, alt: `Folie ${c.slide}` }), el('div', { class: 'io-layer' }, ...c.occ.rects.map((r, i) => el('div', { class: 'io-mask', style: boxStyle(r), title: r.label || '' }, String(i + 1)))));
+  });
+  return el('article', { class: 'icard' },
+    el('div', { class: 'icard-meta' },
+      c.slide ? el('span', { class: 'chip', text: 'Folie ' + c.slide }) : null,
+      el('span', { class: 'chip type', text: TYPE_LABEL.occlusion }),
+      el('span', { class: 'chip', text: `${n} ${n === 1 ? 'Karte' : 'Karten'} · ${c.occ.mode === 'one' ? 'nur die gefragte verdeckt' : 'alle verdeckt'}` }),
+      c.added ? el('span', { class: 'chip new', text: 'ergänzt' }) : null,
+      c.topic ? el('span', { class: 'topic', text: c.topic }) : null),
+    el('div', { class: 'icard-front', html: c.front }),
+    stage,
+    el('div', { class: 'icard-back' }, el('ol', {}, ...c.occ.rects.map(r => el('li', { text: r.label || '(ohne Beschriftung)' }))), c.back ? el('div', { html: c.back }) : null),
+    el('div', { class: 'icard-actions' },
+      el('button', { type: 'button', class: 'btn small ghost', onclick: () => { view.editing = c.id; renderCardList(); } }, 'Bearbeiten'),
+      el('button', { type: 'button', class: 'btn small ghost danger', onclick: () => { state.cards = state.cards.filter(x => x.id !== c.id); saveCards(); renderDeck(); } }, 'Löschen')));
+}
+function occlusionEditor(c) {
+  const id = 'ed-' + c.id;
+  const pdfs = state.files.filter(f => pdfDocs.has(f.id));
+  // Without the PDF only the texts can be changed; masks need the slide.
+  const offline = !pdfDocs.has(c.fileId);
+  let rects = c.occ.rects.map(r => Object.assign({}, r)), boxes = [], shown = false, token = 0;
+  const fileSel = el('select', { id: id + '-file', disabled: offline || null },
+    ...(offline ? [el('option', { value: '' }, c.fileName || 'PDF nicht geladen')] : pdfs.map(f => el('option', { value: String(f.id), selected: f.id === c.fileId || null }, f.name))));
+  const slideIn = el('input', { type: 'number', id: id + '-slide', min: 1, disabled: offline || null }); slideIn.value = c.slide || 1;
+  const modeSel = el('select', { id: id + '-mode' }, el('option', { value: 'all' }, 'Alle verdecken, eine abfragen'), el('option', { value: 'one' }, 'Nur die abgefragte verdecken'));
+  modeSel.value = c.occ.mode === 'one' ? 'one' : 'all';
+  const head = el('input', { type: 'text', id: id + '-head', placeholder: 'Was gehört an die markierte Stelle?' }); head.value = stripHtml(c.front);
+  const topic = el('input', { type: 'text', id: id + '-topic' }); topic.value = c.topic || '';
+  const extra = el('textarea', { id: id + '-extra', rows: 2 }); extra.value = c.back || '';
+  const layer = el('div', { class: 'io-layer' });
+  const stage = el('div', { class: 'io-stage' });
+  const list = el('ol', { class: 'io-list' });
+  const count = el('span', { class: 'hint', role: 'status' });
+  const err = el('p', { class: 'msg err', role: 'status' });
+  const fileOf = () => pdfs.find(f => String(f.id) === fileSel.value);
+  const draw = () => {
+    const cands = boxes.filter(b => !rects.some(r => covers(r, b)));
+    fill(layer, ...cands.map(b => el('div', { class: 'io-cand', style: boxStyle(b), title: b.text, 'data-cand': boxes.indexOf(b) })),
+      ...rects.map((r, i) => el('div', { class: 'io-mask', style: boxStyle(r), title: (r.label || 'Fläche ' + (i + 1)) + ' (Klick hebt die Verdeckung auf)', 'data-mask': i }, String(i + 1))));
+    fill(list, ...rects.map((r, i) => {
+      const inp = el('input', { type: 'text', 'aria-label': `Lösung zu Fläche ${i + 1}`, placeholder: 'Lösung: was unter der Fläche steht' });
+      inp.value = r.label || '';
+      inp.addEventListener('input', () => { r.label = inp.value; });
+      return el('li', {}, el('div', { class: 'io-row' }, inp, el('button', { type: 'button', class: 'btn small ghost danger', onclick: () => { rects.splice(i, 1); draw(); } }, 'Entfernen')));
+    }));
+    count.textContent = rects.length ? `${rects.length} ${rects.length === 1 ? 'Fläche, also 1 Karte' : `Flächen, also ${rects.length} Karten`}` : 'Noch keine Fläche verdeckt.';
+  };
+  const load = async () => {
+    const my = ++token;
+    shown = false; err.textContent = '';
+    if (offline) { fill(stage, el('div', { class: 'io-wait', text: 'Lade die PDF links erneut, um Flächen zu ändern. Lösungen und Texte kannst du auch so bearbeiten.' })); draw(); return; }
+    const f = fileOf(), num = parseInt(slideIn.value, 10), doc = f && pdfDocs.get(f.id);
+    if (!doc || !(num >= 1 && num <= doc.numPages)) { boxes = []; fill(stage, el('div', { class: 'io-wait', text: doc ? `Diese PDF hat ${doc.numPages} Folien.` : 'Wähle eine PDF.' })); draw(); return; }
+    fill(stage, el('div', { class: 'io-wait', text: 'Folie wird geladen …' }));
+    const [url, bx] = await Promise.all([slideUrl(f.id, num), slideBoxes(f.id, num)]);
+    if (my !== token) return;
+    boxes = bx;
+    if (!url) { fill(stage, el('div', { class: 'io-wait', text: 'Die Folie ließ sich nicht anzeigen.' })); draw(); return; }
+    fill(stage, el('img', { src: url, alt: `Folie ${num}` }), layer);
+    shown = true;
+    draw();
+  };
+  // A click covers a text or uncovers a mask again; dragging draws a mask of its own.
+  let start = null, ghost = null;
+  const pos = e => { const b = layer.getBoundingClientRect(); return { x: Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)), y: Math.min(1, Math.max(0, (e.clientY - b.top) / b.height)), px: e.clientX, py: e.clientY }; };
+  const span = (a, b) => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) });
+  layer.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    start = Object.assign(pos(e), { target: e.target });
+    layer.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  layer.addEventListener('pointermove', e => {
+    if (!start) return;
+    const p = pos(e);
+    if (!ghost && Math.hypot(p.px - start.px, p.py - start.py) < 5) return;
+    if (!ghost) { ghost = el('div', { class: 'io-draw' }); layer.append(ghost); }
+    ghost.setAttribute('style', boxStyle(span(start, p)));
+  });
+  layer.addEventListener('pointerup', e => {
+    if (!start) return;
+    const s0 = start; start = null;
+    if (ghost) {
+      ghost.remove(); ghost = null;
+      const r = span(s0, pos(e));
+      if (r.w < 0.008 || r.h < 0.008) return;
+      // Texts whose middle lies inside the drawn area become the solution.
+      const inside = boxes.filter(b => b.x + b.w / 2 > r.x && b.x + b.w / 2 < r.x + r.w && b.y + b.h / 2 > r.y && b.y + b.h / 2 < r.y + r.h);
+      rects.push(Object.assign(r, { id: rectId(rects), label: inside.map(b => b.text).join(' ') }));
+      draw();
+      return;
+    }
+    const t = s0.target;
+    if (t.dataset.mask != null) { rects.splice(Number(t.dataset.mask), 1); draw(); }
+    else if (t.dataset.cand != null) { const b = boxes[Number(t.dataset.cand)]; rects.push(Object.assign(rectOf(b, b.text), { id: rectId(rects) })); draw(); }
+  });
+  layer.addEventListener('pointercancel', () => { start = null; if (ghost) { ghost.remove(); ghost = null; } });
+  const reset = () => { rects = []; load(); };
+  fileSel.addEventListener('change', reset);
+  slideIn.addEventListener('change', reset);
+  load();
+  return el('article', { class: 'icard' }, el('div', { class: 'icard-edit' },
+    el('div', { class: 'row' },
+      el('label', {}, el('span', { class: 'lbl', text: 'PDF' }), fileSel),
+      el('label', {}, el('span', { class: 'lbl', text: 'Folie' }), slideIn),
+      el('label', {}, el('span', { class: 'lbl', text: 'Abfrage' }), modeSel)),
+    el('label', {}, el('span', { class: 'lbl', text: 'Aufgabe auf der Vorderseite' }), head),
+    el('p', { class: 'hint', text: 'Klick auf einen Text verdeckt ihn, ein zweiter Klick deckt ihn wieder auf. Für Stellen ohne Text ziehst du eine Fläche auf. Jede Fläche wird eine eigene Karte. Neue Folie gewählt: die Flächen beginnen von vorn.' }),
+    stage,
+    el('div', { class: 'actions' },
+      el('button', { type: 'button', class: 'btn small', onclick: () => { if (!shown) return; boxes.filter(b => !rects.some(r => covers(r, b))).forEach(b => rects.push(Object.assign(rectOf(b, b.text), { id: rectId(rects) }))); draw(); } }, 'Alle Texte verdecken'),
+      el('button', { type: 'button', class: 'btn small ghost', onclick: () => { rects = []; draw(); } }, 'Alle aufdecken'),
+      count),
+    list,
+    el('div', { class: 'row' }, el('label', {}, el('span', { class: 'lbl', text: 'Thema' }), topic)),
+    el('label', {}, el('span', { class: 'lbl', text: 'Zusatz auf der Rückseite (optional)' }), extra),
+    err,
+    el('div', { class: 'actions' },
+      el('button', { type: 'button', class: 'btn small primary', onclick: () => {
+        if (!offline && !shown) { err.textContent = 'Wähle eine Folie, die angezeigt wird.'; return; }
+        if (!rects.length) { err.textContent = 'Verdecke mindestens eine Stelle: Klick auf einen Text oder zieh eine Fläche auf.'; return; }
+        const f = offline ? null : fileOf();
+        const r4 = v => Math.round(v * 10000) / 10000;
+        Object.assign(c, { type: 'occlusion', front: escapeHtml(head.value.trim()) || 'Was gehört an die markierte Stelle?', back: sanitize(extra.value),
+          fileId: f ? f.id : c.fileId, fileName: f ? f.name : c.fileName, slide: offline ? c.slide : parseInt(slideIn.value, 10), topic: topic.value.trim(),
+          occ: { mode: modeSel.value, rects: rects.map(r => ({ id: r.id, x: r4(r.x), y: r4(r.y), w: r4(r.w), h: r4(r.h), label: String(r.label || '').trim() })) } });
+        delete c.dupe; delete c.draft; view.editing = null; sortCards(); saveCards(); renderDeck();
+      } }, 'Speichern'),
+      el('button', { type: 'button', class: 'btn small', onclick: () => {
+        if (c.draft) state.cards = state.cards.filter(x => x.id !== c.id);
+        view.editing = null; renderDeck();
+      } }, 'Abbrechen'))));
+}
+function addOcclusion() {
+  const [fid, num] = view.slide ? view.slide.split(':') : [];
+  const picked = state.files.find(f => String(f.id) === fid && pdfDocs.has(f.id));
+  const f = picked || state.files.find(x => pdfDocs.has(x.id));
+  if (!f) return;
+  const c = { id: newId('k'), guid: newGuid(), type: 'occlusion', front: '', back: '', fileId: f.id, fileName: f.name, slide: picked ? parseInt(num, 10) : 1, topic: '', occ: { mode: 'all', rects: [] }, draft: true };
+  state.cards.unshift(c); view.editing = c.id; view.search = ''; $('#card-search').value = '';
+  renderDeck();
+  const ed = document.getElementById('ed-' + c.id + '-slide'); if (ed) ed.focus();
+}
+
 /* ---------- Anki-Export (.apkg, Schema 11 wie genanki) ---------- */
 const ANKI_SCHEMA = `CREATE TABLE col (id integer primary key, crt integer not null, mod integer not null, scm integer not null, ver integer not null, dty integer not null, usn integer not null, ls integer not null, conf text not null, models text not null, decks text not null, dconf text not null, tags text not null);
 CREATE TABLE notes (id integer primary key, guid text not null, mid integer not null, mod integer not null, usn integer not null, tags text not null, flds text not null, sfld integer not null, csum integer not null, flags integer not null, data text not null);
@@ -2000,13 +2446,14 @@ CREATE INDEX ix_cards_nid on cards (nid);
 CREATE INDEX ix_cards_sched on cards (did, queue, due);
 CREATE INDEX ix_revlog_cid on revlog (cid);
 CREATE INDEX ix_notes_csum on notes (csum);`;
-const MODEL_IDS = { basic: 1760967101011, reverse: 1760967101022, cloze: 1760967101033 };
+const MODEL_IDS = { basic: 1760967101011, reverse: 1760967101022, cloze: 1760967101033, occlusion: 1760967101044 };
 const CARD_CSS = `.card{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:19px;line-height:1.45;color:#1d2330;background:#fff;text-align:left;padding:10px}
 .q{font-weight:600}
 .a ul,.a ol,.q ul,.q ol{margin:4px 0 4px 1.2em;padding:0}
 .cloze{font-weight:700;color:#2446a6}
 table{border-collapse:collapse;font-size:16px;margin:6px 0}td,th{border:1px solid #bbb;padding:3px 6px;vertical-align:top}th{background:#e8edf8}
 .img img{max-width:100%;margin-top:12px;border:1px solid #ddd}
+.io img{max-width:100%;border:1px solid #ddd}
 .src{margin-top:14px;font-size:12px;color:#8a90a0}
 .night_mode .card,.nightMode .card,.card.nightMode{background:#1d2028;color:#e8eaf0}
 .night_mode .cloze,.nightMode .cloze{color:#9db3f5}
@@ -2017,7 +2464,7 @@ function ankiModels(deckId, nowS) {
   const fld = (name, ord) => ({ name, ord, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] });
   const tmpl = (name, ord, qfmt, afmt) => ({ name, ord, qfmt, afmt, did: null, bqfmt: '', bafmt: '', bfont: '', bsize: 0 });
   const tail = '{{#Bild}}<div class="img">{{Bild}}</div>{{/Bild}}<div class="src">{{Quelle}}{{#Folie}} · Folie {{Folie}}{{/Folie}}</div>';
-  const model = (id, name, type, flds, tmpls, req) => ({ id: String(id), name, type, mod: nowS, usn: -1, sortf: 0, did: deckId, tmpls, flds, css: CARD_CSS, latexPre: LATEX_PRE, latexPost: '\\end{document}', latexsvg: false, req, tags: [], vers: [] });
+  const model = (id, name, type, flds, tmpls, req, sortf = 0) => ({ id: String(id), name, type, mod: nowS, usn: -1, sortf, did: deckId, tmpls, flds, css: CARD_CSS, latexPre: LATEX_PRE, latexPost: '\\end{document}', latexsvg: false, req, tags: [], vers: [] });
   const qaFields = () => ['Vorderseite', 'Rückseite', 'Quelle', 'Folie', 'Bild'].map(fld);
   const fwd = tmpl('Karte 1', 0, '<div class="q">{{Vorderseite}}</div>', '{{FrontSide}}<hr id="answer"><div class="a">{{Rückseite}}</div>' + tail);
   return {
@@ -2026,6 +2473,11 @@ function ankiModels(deckId, nowS) {
       [Object.assign({}, fwd), tmpl('Karte 2', 1, '<div class="q">{{Rückseite}}</div>', '{{FrontSide}}<hr id="answer"><div class="a">{{Vorderseite}}</div>' + tail)], [[0, 'all', [0]], [1, 'all', [1]]]),
     [MODEL_IDS.cloze]: model(MODEL_IDS.cloze, 'Lernstudio Lückentext (Folie)', 1, ['Text', 'Extra', 'Quelle', 'Folie', 'Bild'].map(fld),
       [tmpl('Lückentext', 0, '<div class="q">{{cloze:Text}}</div>', '<div class="q">{{cloze:Text}}</div>{{#Extra}}<hr id="answer"><div class="a">{{Extra}}</div>{{/Extra}}' + tail)], [[0, 'all', [0]]]),
+    // One note per covered area: the slide with the masks in front, the same slide with this area open on the back.
+    [MODEL_IDS.occlusion]: model(MODEL_IDS.occlusion, 'Lernstudio Bildverdeckung (Folie)', 0, ['Verdeckt', 'Aufgedeckt', 'Lösung', 'Überschrift', 'Extra', 'Quelle', 'Folie'].map(fld),
+      [tmpl('Bildverdeckung', 0, '{{#Überschrift}}<div class="q">{{Überschrift}}</div>{{/Überschrift}}<div class="io">{{Verdeckt}}</div>',
+        '{{#Überschrift}}<div class="q">{{Überschrift}}</div>{{/Überschrift}}<div class="io">{{Aufgedeckt}}</div><hr id="answer"><div class="a"><b>{{Lösung}}</b>{{#Extra}}<br>{{Extra}}{{/Extra}}</div><div class="src">{{Quelle}}{{#Folie}} · Folie {{Folie}}{{/Folie}}</div>')],
+      [[0, 'all', [0]]], 2),
   };
 }
 function hash53(str, seed = 0) {
@@ -2069,17 +2521,18 @@ async function buildApkg({ deckName, cards, tags, images }) {
     const insN = db.prepare('INSERT INTO notes VALUES (?,?,?,?,?,?,?,?,?,?,?)');
     const insC = db.prepare('INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
     let nid = nowMs, cid = nowMs, due = 0;
+    const models = ankiModels(did, nowS);
     for (const c of cards) {
-      due++;
-      const mid = MODEL_IDS[c.type] || MODEL_IDS.basic;
-      const quelle = c.fileName ? escapeHtml(c.fileName.replace(/\.[^.]+$/, '')) : '';
-      const bild = images && images.has(c.fileId + ':' + c.slide) ? `<img src="${images.get(c.fileId + ':' + c.slide)}">` : '';
-      const flds = [c.front, c.back || '', quelle, c.slide ? String(c.slide) : '', bild].map(f => String(f).replace(/\x1f/g, ' '));
-      const sfld = stripHtml(flds[0]);
-      const noteTags = [...tags, tagSlug(c.topic), c.kind === 'formula' ? 'Formel' : c.kind === 'calc' ? 'Rechenaufgabe' : ''].filter(Boolean);
-      insN.run([++nid, c.guid || newGuid(), mid, nowS, -1, noteTags.length ? ' ' + Array.from(new Set(noteTags)).join(' ') + ' ' : '', flds.join('\x1f'), sfld, await csumOf(sfld), 0, '']);
-      const ords = c.type === 'cloze' ? clozeOrds(c.front) : c.type === 'reverse' ? [0, 1] : [0];
-      for (const ord of ords) insC.run([++cid, nid, did, ord, nowS, -1, 0, 0, due, 0, 0, 0, 0, 0, 0, 0, 0, '']);
+      for (const n of ankiNotesOf(c, images)) {
+        due++;
+        const flds = n.values.map(f => String(f).replace(/\x1f/g, ' '));
+        const noteTags = [...tags, ...n.tags];
+        // Anki compares first fields with image file names kept (an occlusion note's first field is its image).
+        const first = stripHtml(flds[0].replace(/<img[^>]*src="([^"]+)"[^>]*>/gi, ' $1 '));
+        insN.run([++nid, n.guid, n.mid, nowS, -1, noteTags.length ? ' ' + Array.from(new Set(noteTags)).join(' ') + ' ' : '', flds.join('\x1f'), stripHtml(flds[models[n.mid].sortf]), await csumOf(first), 0, '']);
+        const ords = c.type === 'cloze' ? clozeOrds(c.front) : c.type === 'reverse' ? [0, 1] : [0];
+        for (const ord of ords) insC.run([++cid, nid, did, ord, nowS, -1, 0, 0, due, 0, 0, 0, 0, 0, 0, 0, 0, '']);
+      }
     }
     insN.free(); insC.free();
     return db.export();
@@ -2088,17 +2541,20 @@ async function buildApkg({ deckName, cards, tags, images }) {
 async function packageApkg({ deckName, cards, tags, withImages, onStep }) {
   const media = [], images = new Map();
   if (withImages) {
-    const base = tagSlug(deckName.replace(/::/g, '-')).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'deck';
     const keys = Array.from(new Set(cards.filter(c => c.slide && pdfDocs.has(c.fileId)).map(c => c.fileId + ':' + c.slide)));
     for (const [i, k] of keys.entries()) {
       if (onStep) onStep(`Folienbild ${i + 1} von ${keys.length} wird erstellt …`);
       const [fid, num] = k.split(':').map(Number);
       const blob = await renderSlide(fid, num);
       if (!blob) continue;
-      const name = `lernstudio-${base}-${hash53(deckName).toString(36).slice(0, 6)}-d${fid}-f${num}.jpg`;
+      const name = `${mediaBase(deckName)}-d${fid}-f${num}.jpg`;
       images.set(k, name);
       media.push({ name, data: new Uint8Array(await blob.arrayBuffer()) });
     }
+  }
+  for (const m of await occlusionMedia(cards, deckName, onStep)) {
+    images.set(m.key, m.name);
+    media.push({ name: m.name, data: new Uint8Array(await m.blob.arrayBuffer()) });
   }
   if (onStep) onStep('Anki-Datei wird gebaut …');
   const col = await buildApkg({ deckName, cards, tags, images });
@@ -2140,28 +2596,30 @@ async function sendToAnki(cards, deckName, withImages, msgEl) {
     await ankiCall('createDeck', { deck: deckName });
     const images = new Map();
     if (withImages) {
-      const base = tagSlug(deckName.replace(/::/g, '-')).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'deck';
       const keys = Array.from(new Set(cards.filter(c => c.slide && pdfDocs.has(c.fileId)).map(c => c.fileId + ':' + c.slide)));
       for (const [i, k] of keys.entries()) {
         msgEl.textContent = `Folienbild ${i + 1} von ${keys.length} geht an Anki …`;
         const [fid, num] = k.split(':').map(Number);
         const blob = await renderSlide(fid, num);
         if (!blob) continue;
-        const filename = `lernstudio-${base}-${hash53(deckName).toString(36).slice(0, 6)}-d${fid}-f${num}.jpg`;
+        const filename = `${mediaBase(deckName)}-d${fid}-f${num}.jpg`;
         await ankiCall('storeMediaFile', { filename, data: await blobToB64(blob) });
         images.set(k, filename);
       }
     }
+    const io = await occlusionMedia(cards, deckName, t => { msgEl.textContent = t; });
+    for (const [i, m] of io.entries()) {
+      msgEl.textContent = `Bildverdeckung ${i + 1} von ${io.length} geht an Anki …`;
+      await ankiCall('storeMediaFile', { filename: m.name, data: await blobToB64(m.blob) });
+      images.set(m.key, m.name);
+    }
     const baseTags = [tagSlug($('#course').value), tagSlug($('#lecture').value)].filter(Boolean);
-    const notes = cards.map(c => {
-      const quelle = c.fileName ? escapeHtml(c.fileName.replace(/\.[^.]+$/, '')) : '';
-      const bild = images.has(c.fileId + ':' + c.slide) ? `<img src="${images.get(c.fileId + ':' + c.slide)}">` : '';
-      const model = ankiModels(1, 0)[MODEL_IDS[c.type] || MODEL_IDS.basic];
-      const values = [c.front, c.back || '', quelle, c.slide ? String(c.slide) : '', bild];
-      return { deckName, modelName: model.name, fields: Object.fromEntries(model.flds.map((f, i) => [f.name, values[i]])),
-        tags: Array.from(new Set([...baseTags, tagSlug(c.topic), c.kind === 'formula' ? 'Formel' : c.kind === 'calc' ? 'Rechenaufgabe' : ''].filter(Boolean))),
-        options: { allowDuplicate: false, duplicateScope: 'deck' } };
-    });
+    const models = ankiModels(1, 0);
+    const notes = cards.flatMap(c => ankiNotesOf(c, images).map(n => {
+      const model = models[n.mid];
+      return { deckName, modelName: model.name, fields: Object.fromEntries(model.flds.map((f, i) => [f.name, n.values[i]])),
+        tags: Array.from(new Set([...baseTags, ...n.tags])), options: { allowDuplicate: false, duplicateScope: 'deck' } };
+    }));
     msgEl.textContent = 'Karten gehen an Anki …';
     // Anki rejects a note whose first field already exists in the deck, also twice within one batch.
     const seen = new Set();
@@ -2191,7 +2649,8 @@ async function exportDeck(cards, deckName, withImages, msgEl, extraTag) {
     const base = fileSafe(deckName.split('::').pop());
     await saveFile(base + '.apkg', new Blob([apkg], { type: 'application/octet-stream' }));
     msgEl.className = 'msg ok';
-    msgEl.textContent = `Gespeichert: ${base}.apkg mit ${cards.length} Karten. Ein Doppelklick öffnet sie in Anki.`;
+    const n = noteCount(cards);
+    msgEl.textContent = `Gespeichert: ${base}.apkg mit ${n} ${n === 1 ? 'Karte' : 'Karten'}. Ein Doppelklick öffnet sie in Anki.`;
     return true;
   } catch (e) {
     msgEl.className = 'msg err';
@@ -2268,6 +2727,7 @@ ${examStyleBlock(o)}ALLGEMEINE REGELN:
 - Nur Inhalte aus dem Material, nichts erfinden. Jede Frage nennt die Folie ("slide" = Nummer N aus „=== Datei · Folie N ===“).
 - Verteile die Fragen über den gesamten Ausschnitt und frage das Wichtigste ab (Definitionen, Modelle, Studien und Befunde, Unterschiede, Kritik, Anwendung).
 - Jede Frage ist für sich verständlich und eindeutig, prüft genau einen Gedanken und hat eine fachlich eindeutig richtige Lösung. Keine Spitzfindigkeiten.
+- Bei Transkripten gesprochener Vorlesungen: Füllwörter und Wiederholungen übergehen; was die Lehrperson als wichtig oder klausurrelevant betont, bevorzugt abfragen.
 - Schreibe in der Sprache des Materials. Nur reiner Text, kein HTML, kein Markdown.
 - "level" ist eine der Stufen Erinnern, Verstehen, Anwenden, Analysieren. "topic": Unterthema in 1–4 Wörtern.
 - Optionales Feld "stimulus" (bei jedem Typ): Material, auf das sich die Aufgabe bezieht, z. B. R-Output, Tabelle, Fallvignette oder Zahlenwerte. Zeilenumbrüche darin als \\n.
@@ -2513,6 +2973,7 @@ async function continueQuiz() {
 function startQuiz() {
   const o = quizJobs.length ? quizJobs[0].opts : readQuizOpts();
   const title = o.title || $('#lecture').value.trim() || $('#course').value.trim() || 'Quiz';
+  if (o.filter && o.filter.src === 'weak') o.keepOrder = false;
   const qs = pendingQuestions.map(q => { const c = Object.assign({}, q); delete c.job; return c; });
   // A practice exam keeps the order of its model exam; quizzes are shuffled.
   state.quiz = newQuizState(o.keepOrder ? qs.sort((a, b) => (a.task || 999) - (b.task || 999)) : shuffle(qs), o, title, o.timeLimitMin);
@@ -2520,7 +2981,7 @@ function startQuiz() {
   saveQuiz(); showQuizView();
 }
 function newQuizState(questions, o, title, timeLimitMin) {
-  return { title, created: new Date().toISOString(), settings: { scoring: o.scoring, mode: o.mode, tier: o.tier, k: o.k, tfPenalty: !!o.tfPenalty, keepOrder: !!o.keepOrder, rules: o.rules || null }, questions, answers: {}, results: {}, checked: {}, idx: 0, submitted: false, timeLimitMin: timeLimitMin || null, startedAt: Date.now() };
+  return { title, course: $('#course').value.trim() || null, created: new Date().toISOString(), settings: { scoring: o.scoring, mode: o.mode, tier: o.tier, k: o.k, tfPenalty: !!o.tfPenalty, keepOrder: !!o.keepOrder, rules: o.rules || null }, questions, answers: {}, results: {}, checked: {}, idx: 0, submitted: false, timeLimitMin: timeLimitMin || null, startedAt: Date.now() };
 }
 // Old exams of the current subject that have a blueprint and belong to the subject.
 function blueprintExams(subject) {
@@ -2681,6 +3142,7 @@ async function gradeOpen(q) {
 /* ---------- Quiz: Ansicht ---------- */
 function showQuizView() {
   const qz = state.quiz;
+  renderWeakPanel();
   $('#quiz-setup').hidden = !!qz;
   $('#exam-panel').hidden = !!qz;
   $('#quiz-run').hidden = !qz || qz.submitted;
@@ -2843,6 +3305,110 @@ async function gradeMany(qs, onProgress) {
   });
   return firstErr;
 }
+/* ---------- Schwächen und Wiederholung ---------- */
+// Every graded quiz feeds the weakness overview and the review box. A wrong answer puts the question in the box;
+// it comes back after 1 day, then 3, 7, 14 and 30 days for each correct answer, and is mastered after the fifth.
+const BOX_DAYS = [1, 3, 7, 14, 30];
+const DAY = 86400000;
+const qText = q => (q.type === 'tf' ? q.statement : q.question) || '';
+const qKey = q => hash53(qText(q) + '|' + (q.stimulus || '').slice(0, 200)).toString(36);
+function saveLearning() {
+  while (state.quizLog.length > 3000) state.quizLog.shift();
+  while (state.reviewBox.length > 400) state.reviewBox.shift();
+  if (!store.set('quizLog', state.quizLog)) { state.quizLog = state.quizLog.slice(-800); store.set('quizLog', state.quizLog); }
+  if (!store.set('reviewBox', state.reviewBox)) { state.reviewBox = state.reviewBox.slice(-150); store.set('reviewBox', state.reviewBox); }
+}
+function logQuiz(qz) {
+  if (qz.logged) return;
+  qz.logged = true;
+  const now = Date.now(), here = $('#course').value.trim() || 'Allgemein';
+  for (const q of qz.questions) {
+    const r = resultOf(q);
+    if (!r) continue;
+    const course = q.course || qz.course || here;
+    const part = Math.max(0, Math.min(1, r.score / (r.max || 1)));
+    state.quizLog.push({ at: now, course, topic: q.topic || 'Allgemein', file: q.fileName || '', slide: q.slide || null, type: q.type, part: Math.round(part * 100) / 100 });
+    const key = qKey(q), i = state.reviewBox.findIndex(x => x.key === key);
+    if (part < 1 - 1e-9) {
+      const q2 = JSON.parse(JSON.stringify(q)); q2.course = course;
+      const item = { key, q: q2, course, topic: q.topic || 'Allgemein', box: 0, due: now + BOX_DAYS[0] * DAY, misses: (i >= 0 ? state.reviewBox[i].misses || 0 : 0) + 1 };
+      if (i >= 0) state.reviewBox[i] = item; else state.reviewBox.push(item);
+    } else if (i >= 0) {
+      const it = state.reviewBox[i];
+      it.box++;
+      if (it.box >= BOX_DAYS.length) state.reviewBox.splice(i, 1); else it.due = now + BOX_DAYS[it.box] * DAY;
+    }
+  }
+  saveLearning();
+}
+// Topics answered worst, per course: share of points reached, from at least two answers.
+function weakTopics(course) {
+  const m = new Map();
+  for (const e of state.quizLog) {
+    if (course && e.course !== course) continue;
+    const k = e.course + '\x1f' + e.topic;
+    const x = m.get(k) || { course: e.course, topic: e.topic, n: 0, sum: 0, last: 0, slides: new Map() };
+    x.n++; x.sum += e.part; x.last = Math.max(x.last, e.at);
+    if (e.slide && e.part < 1) x.slides.set(e.file + '\x1f' + e.slide, { file: e.file, slide: e.slide });
+    m.set(k, x);
+  }
+  return Array.from(m.values()).map(x => Object.assign(x, { rate: x.sum / x.n })).filter(x => x.n >= 2 && x.rate < 0.8).sort((a, b) => a.rate - b.rate || b.n - a.n);
+}
+function startReview() {
+  const now = Date.now();
+  const due = state.reviewBox.filter(x => x.due <= now);
+  if (!due.length) return;
+  const qs = shuffle(due.slice(0, 40).map(x => JSON.parse(JSON.stringify(x.q))));
+  state.quiz = newQuizState(qs, { scoring: 'partial', mode: 'lern', tier: 'default', k: 5, tfPenalty: false }, `Wiederholung (${qs.length} ${qs.length === 1 ? 'Frage' : 'Fragen'})`, null);
+  state.quiz.review = true;
+  saveQuiz(); showQuizView();
+}
+// A new quiz on the slides behind the weak topics (with one slide around each), from the material that is loaded now.
+function startWeakQuiz(course) {
+  const msg = $('#weak-msg');
+  const weak = weakTopics(course).slice(0, 8);
+  const loaded = new Map(state.files.filter(f => f.status === 'ok').map(f => [f.name, f.id]));
+  const nums = new Set();
+  weak.forEach(w => w.slides.forEach(({ file, slide }) => { if (loaded.has(file)) [slide - 1, slide, slide + 1].forEach(n => n > 0 && nums.add(n)); }));
+  if (!nums.size) {
+    msg.textContent = 'Lade links das Material dieser Themen, um neue Fragen dazu zu erstellen. Die falsch beantworteten Fragen übst du über „Jetzt wiederholen“.';
+    return;
+  }
+  const inc = Array.from(nums).sort((a, b) => a - b).map(n => [n, n]);
+  const extra = `Schwerpunkt auf diesen Themen, bei denen ich in Quizzen oft falsch lag: ${weak.map(w => w.topic).join('; ')}. Frage dieselben Inhalte aus anderen Blickwinkeln ab, nicht dieselben Fragen.`;
+  generateQuiz({ filter: { inc, exc: [], src: 'weak' }, req: [$('#quiz-req').value.trim(), extra].filter(Boolean).join('\n'), title: 'Schwächen: ' + (course || 'alle Kurse') });
+}
+function renderWeakPanel() {
+  const box = $('#weak-panel');
+  const now = Date.now();
+  const due = state.reviewBox.filter(x => x.due <= now).length;
+  if (!state.quizLog.length && !state.reviewBox.length) { box.hidden = true; fill(box); return; }
+  box.hidden = !!state.quiz;
+  const courses = Array.from(new Set(state.quizLog.map(e => e.course)));
+  const here = $('#course').value.trim();
+  const sel = store.get('weakCourse', '') || (courses.includes(here) ? here : '');
+  const weak = weakTopics(sel || null).slice(0, 8);
+  const next = state.reviewBox.filter(x => x.due > now).sort((a, b) => a.due - b.due)[0];
+  const day = t => new Date(t).toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric' });
+  fill(box,
+    el('div', { class: 'panel-head' }, el('h2', { text: 'Wiederholung und Schwächen' }), el('span', { class: 'hint', text: `${state.quizLog.length} beantwortete Fragen` })),
+    el('div', { class: 'actions' },
+      el('span', {}, el('b', { text: due ? `${due} ${due === 1 ? 'Frage ist' : 'Fragen sind'} fällig` : 'Nichts fällig' }),
+        ` · ${state.reviewBox.length} in der Wiederholungsbox` + (!due && next ? `, nächste am ${day(next.due)}` : '')),
+      el('button', { type: 'button', class: 'btn primary', disabled: !due || null, onclick: startReview }, 'Jetzt wiederholen')),
+    el('p', { class: 'hint', text: 'Falsch beantwortete Fragen kommen nach 1, 3, 7, 14 und 30 Tagen wieder. Nach fünfmal richtig gelten sie als gelernt.' }),
+    courses.length > 1 ? el('label', {}, el('span', { class: 'lbl', text: 'Kurs' }), el('select', { onchange: e => { store.set('weakCourse', e.target.value); renderWeakPanel(); } },
+      el('option', { value: '', text: 'Alle Kurse', selected: !sel || null }), ...courses.map(c => el('option', { value: c, text: c, selected: c === sel || null })))) : null,
+    weak.length ? el('div', { class: 'tbl-wrap' }, el('table', { class: 'tbl' },
+      el('thead', {}, el('tr', {}, el('th', { text: 'Schwächstes Thema' }), el('th', { text: 'Kurs' }), el('th', { text: 'Fragen' }), el('th', { text: 'Richtig' }))),
+      el('tbody', {}, ...weak.map(w => el('tr', {}, el('td', { text: w.topic }), el('td', { text: w.course }), el('td', { class: 'num', text: w.n }),
+        el('td', {}, el('div', { class: 'bar', role: 'img', 'aria-label': Math.round(w.rate * 100) + ' %' }, el('i', { style: `width:${Math.round(w.rate * 100)}%` })))))))) :
+      el('p', { class: 'hint', text: 'Noch keine schwachen Themen: Ein Thema erscheint hier, wenn du darin mindestens zwei Fragen beantwortet und weniger als 80 % erreicht hast.' }),
+    el('div', { class: 'actions' },
+      weak.length ? el('button', { type: 'button', class: 'btn', onclick: () => startWeakQuiz(sel || null) }, 'Neues Quiz zu diesen Themen') : null,
+      el('button', { type: 'button', class: 'btn small ghost', onclick: e => armConfirm(e.currentTarget, 'Verlauf und Box wirklich leeren?', () => { state.quizLog = []; state.reviewBox = []; saveLearning(); renderWeakPanel(); }) }, 'Verlauf zurücksetzen'),
+      el('span', { id: 'weak-msg', class: 'hint', role: 'status' })));
+}
 async function submitQuiz(btn, status, timedOut) {
   const qz = state.quiz;
   if (!qz || qz.submitted) return;
@@ -2853,7 +3419,7 @@ async function submitQuiz(btn, status, timedOut) {
   status.className = 'msg';
   const err = await gradeMany(open, (d, n) => { if (n) status.textContent = `Claude bewertet offene Antworten (${d}/${n}) …`; });
   if (err) { status.className = 'msg err'; status.textContent = errText(err); }
-  qz.submitted = true; saveQuiz(); showQuizView();
+  qz.submitted = true; logQuiz(qz); saveQuiz(); showQuizView();
 }
 function renderResult() {
   const qz = state.quiz;
@@ -3257,13 +3823,228 @@ function renderExamPanel() {
       el('button', { type: 'button', class: 'btn small ghost', onclick: e => armConfirm(e.currentTarget, 'Wirklich löschen?', () => { delete state.examStyles[subject]; saveExams(); renderExamPanel(); }) }, 'Klausurstil löschen')));
 }
 
+/* ---------- Lernplan ---------- */
+// Spacing as in the review box: learn once, then review after 1, 3, 7, 14 and 30 days. The final phase (at least the
+// last week) belongs to a full review and practice exams (7 and 3 days before); the day before the exam is light.
+const PLAN_REVIEWS = [1, 3, 7, 14, 30];
+const PLAN_MIN = { neu: 45, wdh: 15, final: 20, mock: 90, anki: 15, box: 10 };
+const WEEKDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+const isoDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const fromIso = s => { const [y, m, d] = String(s).split('-').map(Number); return y ? new Date(y, m - 1, d) : null; };
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const dayLabel = d => d.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric' });
+function planInputs() {
+  return { subject: $('#plan-subject').value.trim(), exam: $('#plan-exam').value, start: $('#plan-start').value, minutes: Math.max(15, parseInt($('#plan-minutes').value, 10) || 60),
+    days: $$('#plan-days input').map(i => i.checked), units: $('#plan-units').value, mocks: Math.max(0, Math.min(4, parseInt($('#plan-mocks').value, 10) || 0)) };
+}
+function renderPlanForm(subjectChanged) {
+  const plans = store.get('plans', {});
+  if (!subjectChanged && !$('#plan-subject').value) $('#plan-subject').value = store.get('planSubject', '') || $('#course').value.trim();
+  const p = plans[$('#plan-subject').value.trim()];
+  if (!$('#plan-days').children.length || subjectChanged) {
+    const on = p ? p.days : [true, true, true, true, true, false, false];
+    fill($('#plan-days'), ...WEEKDAYS.map((w, i) => el('label', {}, el('input', { type: 'checkbox', checked: on[i] || null }), el('span', { text: w }))));
+  }
+  if (p && (subjectChanged || !$('#plan-exam').value)) {
+    $('#plan-exam').value = p.exam || ''; $('#plan-start').value = p.start || ''; $('#plan-minutes').value = p.minutes || 60; $('#plan-units').value = p.units || ''; $('#plan-mocks').value = p.mocks != null ? p.mocks : 2;
+  }
+  if (!$('#plan-start').value) $('#plan-start').value = isoDay(new Date());
+  if (p && p.exam && !subjectChanged && $('#plan-view').hidden) makePlan(true);
+}
+// Study units from earlier exports of this subject (the last part of each deck name) and the current lecture.
+function fillPlanUnits() {
+  const subj = $('#plan-subject').value.trim();
+  const names = state.exportHistory.filter(h => !subj || h.course === subj || h.deck.startsWith(subj)).map(h => h.deck.split('::').pop());
+  const lec = $('#lecture').value.trim(); if (lec) names.push(lec);
+  const have = $('#plan-units').value.split('\n').map(x => x.trim()).filter(Boolean);
+  const all = Array.from(new Set([...have, ...names])).sort((a, b) => a.localeCompare(b, 'de', { numeric: true }));
+  $('#plan-units').value = all.join('\n');
+  $('#plan-msg').textContent = names.length ? '' : 'Für dieses Fach gibt es noch keine Exporte. Trag die Vorlesungen selbst ein, gern mit Datum.';
+}
+// A date in a unit line ("26.10.", "26.10.26", "26.10.2026") is the day of that session.
+function parsePlanUnits(text, start, exam) {
+  return String(text).split('\n').map(l => l.trim()).filter(Boolean).map(line => {
+    const m = line.match(/\b(\d{1,2})\.(\d{1,2})\.(\d{2,4})?/);
+    let from = null;
+    if (m) {
+      let y = m[3] ? +m[3] : start.getFullYear();
+      if (y < 100) y += 2000;
+      from = new Date(y, +m[2] - 1, +m[1]);
+      if (!m[3] && from < addDays(start, -200)) from = new Date(y + 1, +m[2] - 1, +m[1]);
+      if (!m[3] && from > exam) from = new Date(y - 1, +m[2] - 1, +m[1]);
+    }
+    const name = line.replace(/\b\d{1,2}\.\d{1,2}\.(\d{2,4})?/, '').replace(/\s{2,}/g, ' ').trim() || line;
+    return { name, from };
+  });
+}
+function buildPlan(inp) {
+  const start = fromIso(inp.start), exam = fromIso(inp.exam);
+  if (!exam) throw new Error('Trag den Klausurtermin ein.');
+  if (!start || start >= exam) throw new Error('Der Beginn muss vor dem Klausurtermin liegen.');
+  if (!inp.days.some(Boolean)) throw new Error('Wähle mindestens einen Lerntag.');
+  const units = parsePlanUnits(inp.units, start, exam);
+  if (!units.length) throw new Error('Trag mindestens eine Lerneinheit ein.');
+  const learn = [];
+  for (let d = start; d < exam; d = addDays(d, 1)) if (inp.days[(d.getDay() + 6) % 7]) learn.push(d);
+  if (learn.length < 3) throw new Error('Bis zur Klausur bleiben zu wenige Lerntage. Wähle mehr Lerntage oder einen früheren Beginn.');
+  const days = new Map(learn.map((d, i) => [isoDay(d), { date: d, i, tasks: [], min: PLAN_MIN.anki }]));
+  const all = Array.from(days.values());
+  const budget = inp.minutes;
+  const at = d => d && days.get(isoDay(d));
+  const add = (day, kind, text) => { day.tasks.push({ kind, text, min: PLAN_MIN[kind] }); day.min += PLAN_MIN[kind]; return day; };
+  // Place a task on the first study day from d on; with room to shift, the first of the next days that still fits the budget.
+  const put = (d, kind, text, shift, lastIdx) => {
+    const first = learn.findIndex(x => x >= d);
+    if (first < 0 || first > lastIdx) return null;
+    for (let k = 0; k <= shift && first + k <= lastIdx; k++) {
+      const day = all[first + k];
+      if (day.min + PLAN_MIN[kind] <= budget) return add(day, kind, text);
+    }
+    return add(all[first], kind, text);
+  };
+  const lastDay = all[all.length - 1];
+  // Final phase: at least the last week; longer if reviewing every unit once does not fit the daily budget.
+  const perDay = kind => Math.max(1, Math.floor((budget - PLAN_MIN.anki) / PLAN_MIN[kind]));
+  const needDays = Math.ceil(units.length / perDay('final')) + inp.mocks + 1;
+  const weekIdx = learn.findIndex(d => d >= addDays(exam, -7));
+  const finalIdx = Math.max(0, Math.min(weekIdx < 0 ? learn.length - 1 : weekIdx, learn.length - needDays));
+  // New units: on the first study day after their session. Units without a date, or whose session was before the start,
+  // are caught up one per day from the start; if no unit has a date, they are spread over the first 60 % of the time
+  // before the final phase (longer if that is more than fits the daily budget).
+  const late = [];
+  const backlog = units.filter(u => !u.from || u.from < start);
+  units.filter(u => u.from && u.from >= start).forEach(u => { u.day = at(learn.find(x => x > u.from)); if (!u.day) late.push(u.name); });
+  if (units.some(u => u.from)) {
+    const taken = new Set(units.filter(u => u.day).map(u => u.day.i));
+    let k = 0;
+    for (const u of backlog) { while (k < finalIdx && taken.has(k)) k++; u.day = all[Math.min(k, Math.max(0, finalIdx - 1))]; taken.add(k); k++; }
+  } else {
+    const base = finalIdx >= 3 ? finalIdx : Math.max(1, learn.length - 1 - inp.mocks);
+    const span = Math.max(1, Math.min(base, Math.max(Math.ceil(base * 0.6), Math.ceil(backlog.length / perDay('neu')))));
+    backlog.forEach((u, n) => { u.day = all[Math.min(span - 1, Math.floor(n * span / backlog.length))]; });
+  }
+  const taught = units.filter(u => u.day);
+  for (const u of taught) add(u.day, 'neu', 'Neu lernen: ' + u.name + ' (Karten erstellen und lernen)');
+  // Practice exams 7 and 3 days before the exam (then 10 and 5), after the last new unit (if a lecture comes too late
+  // for that: after 80 % of the units) and never on the last day.
+  const learnedAt = taught.map(u => u.day.i).sort((a, b) => a - b);
+  const mocks = [];
+  for (const n of [7, 3, 10, 5].slice(0, inp.mocks)) {
+    const pick = after => {
+      const free = d => d.i > after && d !== lastDay && !mocks.includes(d);
+      return all.find(d => d.date >= addDays(exam, -n) && free(d)) || all.find(d => d.i >= finalIdx && free(d)) || all.find(free);
+    };
+    const day = pick(learnedAt[learnedAt.length - 1]) || pick(learnedAt[Math.ceil(learnedAt.length * 0.8) - 1]);
+    if (day) mocks.push(day);
+  }
+  mocks.sort((a, b) => a.date - b.date).forEach((d, k) => add(d, 'mock', `Probeklausur ${k + 1} (Quiz-Tab: „Probeklausur erstellen“), danach Fehler nacharbeiten`));
+  add(lastDay, 'box', 'Wiederholungsbox und schwächste Themen (Quiz-Tab), keine neuen Inhalte, früh schlafen');
+  // Reviews after 1, 3, 7, 14 and 30 days, up to 2 study days later if a day is full; none in the final phase.
+  for (const u of taught) PLAN_REVIEWS.forEach((n, k) => put(addDays(u.day.date, n), 'wdh', `Wiederholen (${k + 1}.): ${u.name}`, 2, finalIdx - 1));
+  // Full review: each unit once in the final phase, after it was learned, on the least loaded day without a practice exam.
+  const finals = all.slice(finalIdx).filter(d => d !== lastDay && !mocks.includes(d));
+  for (const u of taught) {
+    const after = finals.filter(d => d.i > u.day.i);
+    const pool = after.length ? after : all.filter(d => d.i > u.day.i && !mocks.includes(d));
+    if (pool.length) add(pool.reduce((a, b) => (b.min < a.min ? b : a)), 'final', 'Gesamtwiederholung: ' + u.name);
+  }
+  // Anki reviews belong on every study day; within a day, tasks in the order they are best done.
+  const ORDER = ['anki', 'neu', 'wdh', 'final', 'mock', 'box'];
+  for (const day of all) {
+    day.tasks.unshift({ kind: 'anki', text: 'Anki: fällige Karten', min: PLAN_MIN.anki });
+    day.tasks.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
+    // A practice exam takes as long as it takes; that alone does not count as over budget.
+    day.over = day.min - (mocks.includes(day) ? PLAN_MIN.mock : 0) > budget;
+  }
+  return { list: all, exam, start, units, late, over: all.filter(d => d.over).length, mockOver: mocks.some(d => d.min > budget),
+    mocks: mocks.length, mocksWanted: inp.mocks, learnDays: learn.length, finalFrom: learn[finalIdx] };
+}
+let currentPlan = null;
+function makePlan(quiet) {
+  const msg = $('#plan-msg'), inp = planInputs();
+  msg.className = 'hint'; msg.textContent = '';
+  let plan;
+  try { plan = buildPlan(inp); }
+  catch (e) { if (quiet !== true) { msg.className = 'hint msg err'; msg.textContent = e.message; } return; }
+  currentPlan = Object.assign(plan, { subject: inp.subject || 'Klausur', minutes: inp.minutes });
+  const plans = store.get('plans', {});
+  plans[inp.subject || 'Klausur'] = inp;
+  store.set('plans', plans); store.set('planSubject', inp.subject);
+  renderPlan();
+}
+function renderPlan() {
+  const p = currentPlan, box = $('#plan-view');
+  if (!p) { box.hidden = true; return; }
+  box.hidden = false;
+  const today = isoDay(new Date());
+  const week = d => { const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day); const y = new Date(Date.UTC(t.getUTCFullYear(), 0, 1)); return Math.ceil(((t - y) / 86400000 + 1) / 7); };
+  const rows = [];
+  let lastWeek = null;
+  for (const d of p.list) {
+    const w = week(d.date);
+    if (w !== lastWeek) { rows.push(el('div', { class: 'plan-week', text: `KW ${w}` })); lastWeek = w; }
+    rows.push(el('div', { class: 'plan-day' + (isoDay(d.date) === today ? ' today' : '') + (d.over ? ' over' : '') },
+      el('b', { text: dayLabel(d.date) }), el('ul', {}, ...d.tasks.map(t => el('li', { text: t.text }))), el('span', { class: 'plan-min', text: `≈ ${d.min} min` })));
+  }
+  rows.push(el('div', { class: 'plan-day exam' }, el('b', { text: dayLabel(p.exam) }), el('span', { text: `Klausur ${p.subject}` }), el('span')));
+  const dueBox = state.reviewBox.filter(x => x.due <= Date.now()).length;
+  fill(box,
+    el('div', { class: 'panel-head' }, el('h2', { text: `Lernplan ${p.subject}` }), el('span', { class: 'hint', text: `${p.list.length} Lerntage bis ${dayLabel(p.exam)} · ${p.units.length} Einheiten` })),
+    p.over ? el('div', { class: 'notice', text: `An ${p.over} ${p.over === 1 ? 'Tag' : 'Tagen'} reicht dein Zeitbudget von ${p.minutes} Minuten nicht (rot markiert). Fang früher an, nimm mehr Lerntage oder plane an diesen Tagen mehr Zeit ein.` }) : null,
+    p.mockOver ? el('p', { class: 'hint', text: `Probeklausur-Tage brauchen mit Anki etwa ${PLAN_MIN.mock + PLAN_MIN.anki} Minuten, mehr als dein Tagesbudget. Plane dort mehr Zeit ein.` }) : null,
+    p.mocks < p.mocksWanted ? el('div', { class: 'notice', text: `Nach dem neuen Stoff bleibt nur Platz für ${p.mocks} von ${p.mocksWanted} Probeklausuren. Fang früher an oder nimm mehr Lerntage.` }) : null,
+    p.late.length ? el('div', { class: 'notice', text: `Erst nach dem letzten Lerntag: ${p.late.join(', ')}. Prüfe die Daten dieser Einheiten.` }) : null,
+    dueBox ? el('p', { class: 'hint', text: `Heute zusätzlich: ${dueBox} ${dueBox === 1 ? 'Frage' : 'Fragen'} in der Wiederholungsbox (Quiz-Tab).` }) : null,
+    el('div', { class: 'actions' }, el('button', { type: 'button', class: 'btn', onclick: e => savePlanCalendar(e.currentTarget) }, 'Als Kalender speichern'), el('span', { id: 'plan-save-msg', class: 'hint', role: 'status' })),
+    ...rows);
+}
+// One all-day event per study day with its tasks, plus the exam; opens in Apple Calendar, Outlook and Google Calendar.
+function planIcs(p) {
+  const esc = t => String(t).replace(/\\/g, '\\\\').replace(/[,;]/g, m => '\\' + m).replace(/\n/g, '\\n');
+  const ymd = d => isoDay(d).replace(/-/g, '');
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  // Lines longer than 75 bytes are folded: CRLF plus a space, never inside a character.
+  const fold = line => {
+    let out = '', n = 0;
+    for (const ch of line) {
+      const b = new TextEncoder().encode(ch).length;
+      if (n + b > 75) { out += '\r\n '; n = 1; }
+      out += ch; n += b;
+    }
+    return out;
+  };
+  const ev = (d, summary, desc) => ['BEGIN:VEVENT', `UID:${ymd(d)}-${hash53(summary + desc).toString(36)}@lernstudio`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${ymd(d)}`, `DTEND;VALUE=DATE:${ymd(addDays(d, 1))}`, `SUMMARY:${esc(summary)}`, desc ? `DESCRIPTION:${esc(desc)}` : null, 'END:VEVENT'].filter(Boolean).map(fold).join('\r\n');
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Vorlesungs-Lernstudio//Lernplan//DE', 'CALSCALE:GREGORIAN',
+    ...p.list.map(d => ev(d.date, `Lernen ${p.subject} (≈ ${d.min} min)`, d.tasks.map(t => '• ' + t.text).join('\n'))),
+    ev(p.exam, `Klausur ${p.subject}`, ''), 'END:VCALENDAR'].join('\r\n') + '\r\n';
+}
+const IS_SITE = true; // the site build sets true: it can save a real .ics, claude.ai only allows it inside a .zip
+async function savePlanCalendar(btn) {
+  const p = currentPlan, msg = $('#plan-save-msg');
+  if (!p) return;
+  btn.disabled = true; msg.className = 'hint';
+  try {
+    const name = fileSafe('Lernplan ' + p.subject);
+    const ics = new Blob([planIcs(p)], { type: 'text/calendar' });
+    if (IS_SITE) await saveFile(name + '.ics', ics);
+    else {
+      await loadScript(CDN.jszip);
+      const zip = new window.JSZip(); zip.file(name + '.ics', ics);
+      msg.textContent = 'Bitte bestätige das Speichern.';
+      await saveFile(name + '.zip', await zip.generateAsync({ type: 'blob', compression: 'STORE' }));
+    }
+    msg.className = 'hint msg ok';
+    msg.textContent = IS_SITE ? `Gespeichert: ${name}.ics. Ein Doppelklick fügt die Lerntage deinem Kalender hinzu.` : `Gespeichert: ${name}.zip. Entpacken und die .ics doppelklicken, dann landen die Lerntage in deinem Kalender.`;
+  } catch (e) { msg.className = 'hint msg err'; msg.textContent = errText(e); }
+  finally { btn.disabled = false; }
+}
+
 /* ---------- Tabs ---------- */
+const TABS = ['karten', 'quiz', 'plan'];
 function showTab(name) {
-  const isQuiz = name === 'quiz';
-  $('#tab-karten').setAttribute('aria-selected', String(!isQuiz));
-  $('#tab-quiz').setAttribute('aria-selected', String(isQuiz));
-  $('#view-karten').hidden = isQuiz;
-  $('#view-quiz').hidden = !isQuiz;
+  if (!TABS.includes(name)) name = 'karten';
+  for (const t of TABS) { $('#tab-' + t).setAttribute('aria-selected', String(t === name)); $('#view-' + t).hidden = t !== name; }
+  if (name === 'plan') renderPlanForm();
   store.set('tab', name);
   try { history.replaceState(null, '', '#' + name); } catch {}
 }
@@ -3279,6 +4060,7 @@ function restoreSettings() {
     const d = $(`input[name=density][value="${co.density}"]`); if (d) d.checked = true;
     $('#opt-reverse').checked = co.reverse !== false;
     $('#opt-cloze').checked = co.cloze !== false;
+    $('#opt-occlusion').checked = co.occlusion !== false;
     if (co.lang) $('#opt-lang').value = co.lang;
     if (co.tier) $('#opt-tier').value = co.tier;
     $('#opt-coverage').checked = co.coverage !== false;
@@ -3310,7 +4092,16 @@ function bind() {
   $('#key-forget').addEventListener('click', e => armConfirm(e.currentTarget, 'Wirklich entfernen?', () => { forgetKey(); paintKey(); }));
   $('#tab-karten').addEventListener('click', () => showTab('karten'));
   $('#tab-quiz').addEventListener('click', () => showTab('quiz'));
-  $('.tabs').addEventListener('keydown', e => { if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { const q = $('#tab-karten').getAttribute('aria-selected') === 'true'; showTab(q ? 'quiz' : 'karten'); $(q ? '#tab-quiz' : '#tab-karten').focus(); } });
+  $('#tab-plan').addEventListener('click', () => showTab('plan'));
+  $('.tabs').addEventListener('keydown', e => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    const cur = TABS.findIndex(t => $('#tab-' + t).getAttribute('aria-selected') === 'true');
+    const next = TABS[(cur + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length];
+    showTab(next); $('#tab-' + next).focus();
+  });
+  $('#plan-make').addEventListener('click', makePlan);
+  $('#plan-fill').addEventListener('click', fillPlanUnits);
+  $('#plan-subject').addEventListener('change', () => renderPlanForm(true));
   const drop = $('#drop');
   $('#file-input').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
   ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
@@ -3329,6 +4120,7 @@ function bind() {
   $('#run-coverage').addEventListener('click', () => runCoverage(false));
   $('#card-search').addEventListener('input', e => { view.search = e.target.value.trim(); renderCardList(); });
   $('#add-card').addEventListener('click', addCard);
+  $('#add-occlusion').addEventListener('click', addOcclusion);
   $('#drop-dupes').addEventListener('click', () => { state.cards = state.cards.filter(c => !c.dupe); saveCards(); renderDeck(); });
   $('#drop-known').addEventListener('click', e => armConfirm(e.currentTarget, 'Wirklich entfernen?', () => { state.cards = state.cards.filter(c => !c.known); saveCards(); renderDeck(); }));
   const ldrop = $('#lib-drop');
@@ -3344,10 +4136,18 @@ function bind() {
     const deckName = $('#deck-name').value.trim() || defaultDeckName();
     const exported = new Set(state.exportHistory.filter(h => h.deck === deckName).flatMap(h => h.guids));
     const onlyNew = !$('#only-new-row').hidden && $('#opt-onlynew').checked;
-    const cards = state.cards.filter(c => !c.draft && !(onlyNew && exported.has(c.guid)));
-    if (!cards.length) { $('#export-msg').className = 'msg'; $('#export-msg').textContent = 'Alle Karten wurden schon exportiert.'; return; }
+    const cards = state.cards.filter(c => !c.draft && !(onlyNew && noteGuids(c).every(g => exported.has(g))));
+    const msg = $('#export-msg');
+    if (!cards.length) { msg.className = 'msg'; msg.textContent = 'Alle Karten wurden schon exportiert.'; return; }
+    // Image occlusion needs the slide; without the PDF those cards wait for a later export.
+    const lost = cards.filter(c => c.type === 'occlusion' && !pdfDocs.has(c.fileId));
+    const go = cards.filter(c => !lost.includes(c));
+    if (!go.length) { msg.className = 'msg err'; msg.textContent = 'Bildverdeckungskarten brauchen die PDF der Folie. Lade sie links erneut.'; return; }
     b.disabled = true;
-    if (await send(cards, deckName, $('#opt-slideimg').checked, $('#export-msg'))) { recordExport(deckName, cards); renderDeck(true); }
+    if (await send(go, deckName, $('#opt-slideimg').checked, msg)) {
+      recordExport(deckName, go); renderDeck(true);
+      if (lost.length) msg.textContent += ` ${lost.length} ${lost.length === 1 ? 'Bildverdeckung fehlt' : 'Bildverdeckungen fehlen'}, weil die PDF nicht geladen ist. Lade sie links erneut und exportiere dann nur neue Karten.`;
+    }
     b.disabled = false;
   };
   $('#export-apkg').addEventListener('click', exportWith(exportDeck));
@@ -3385,7 +4185,7 @@ function init() {
   renderCardResume();
   renderQuizResume();
   const hash = (location.hash || '').replace('#', '');
-  showTab(hash === 'quiz' || hash === 'karten' ? hash : store.get('tab', 'karten'));
+  showTab(TABS.includes(hash) ? hash : store.get('tab', 'karten'));
   showQuizView();
   updateImageOptions();
   paintKey();

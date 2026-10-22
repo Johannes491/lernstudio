@@ -378,15 +378,18 @@ body = replace(body, """    const base = fileSafe(deckName.split('::').pop());
     msgEl.textContent = 'Bitte bestätige das Speichern.';
     await saveFile(base + '.zip', blob);
     msgEl.className = 'msg ok';
-    msgEl.textContent = `Gespeichert: ${base}.zip mit ${cards.length} Karten. Entpacken und die .apkg mit Anki öffnen.`;""",
+    const n = noteCount(cards);
+    msgEl.textContent = `Gespeichert: ${base}.zip mit ${n} ${n === 1 ? 'Karte' : 'Karten'}. Entpacken und die .apkg mit Anki öffnen.`;""",
 """    const base = fileSafe(deckName.split('::').pop());
     await saveFile(base + '.apkg', new Blob([apkg], { type: 'application/octet-stream' }));
     msgEl.className = 'msg ok';
-    msgEl.textContent = `Gespeichert: ${base}.apkg mit ${cards.length} Karten. Ein Doppelklick öffnet sie in Anki.`;""")
+    const n = noteCount(cards);
+    msgEl.textContent = `Gespeichert: ${base}.apkg mit ${n} ${n === 1 ? 'Karte' : 'Karten'}. Ein Doppelklick öffnet sie in Anki.`;""")
 body = replace(body, "  msg.className = 'msg'; msg.textContent = 'Bitte bestätige das Speichern.';\n", "  msg.className = 'msg';\n")
 
 # direct export to Anki through AnkiConnect works only here (claude.ai blocks local connections)
 body = replace(body, "const DIRECT_ANKI = false;", "const DIRECT_ANKI = true;")
+body = replace(body, "const IS_SITE = false;", "const IS_SITE = true;")
 
 # start-up and key controls
 body = replace(body, "  initCaps();\n", "  paintKey();\n  idle(() => loadSdk().catch(() => {}));\n")

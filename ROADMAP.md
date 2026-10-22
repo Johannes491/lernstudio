@@ -18,10 +18,12 @@
 | Kartenverlauf pro Kurs, Export nur neuer Karten | erledigt |
 
 ## Phase 3: Lernsteuerung und neue Quellen
-- Schwächen-Training aus gesammelten Quizergebnissen
-- Vorlesungsaufzeichnungen und Transkripte als Quelle
-- Lernplan bis zur Klausur
-- Bildverdeckungskarten für Diagramme
+| Was | Stand |
+|---|---|
+| Schwächen-Training aus gesammelten Quizergebnissen | erledigt: Wiederholungsbox (1, 3, 7, 14, 30 Tage) und Quiz zu den schwächsten Themen pro Kurs |
+| Vorlesungsaufzeichnungen und Transkripte als Quelle | erledigt für Transkripte (.vtt, .srt, .txt) in 5-Minuten-Abschnitten; Audio und Video selbst kann der Browser nicht abschreiben |
+| Lernplan bis zur Klausur | erledigt: neuer Stoff nach Vorlesungsdatum, verteilte Wiederholungen, Endphase mit Gesamtwiederholung und Probeklausuren, Zeitbudget pro Tag, Kalenderexport |
+| Bildverdeckungskarten für Diagramme | erledigt: Vorschlag von Claude bei beschrifteten Diagrammen, Editor mit Klick auf Folientext oder eigenen Flächen, eigener Notiztyp in Anki; nur für PDFs |
 
 ## Technik
 - Automatische Tests (nachgebaute API plus Anki-Import) als GitHub Action
