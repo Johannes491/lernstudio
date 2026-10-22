@@ -640,6 +640,8 @@ async function initCaps() {
 }
 // Speed: the platform runs a couple of calls at once and queues a few more, so 3 keeps every slot busy.
 const POOL = 3;
+// Calls that really run at the same time; work is split into multiples of this, so no slot idles at the end.
+const RUNNING = 2;
 // Speed: card writing is extraction, so little thinking is needed; checks and distractors get a bit more.
 const EFFORT = { cards: 'low', coverage: 'medium', quiz: 'medium', grade: 'low', exam: 'high' };
 function callOpts({ tier, effort, signal, images }) {
@@ -706,6 +708,27 @@ async function saveFile(filename, data) {
 async function runPool(items, n, signal, fn) {
   let i = 0;
   const worker = async () => { while (i < items.length) { const it = items[i++]; if (signal.aborted) { it.status = 'abgebrochen'; continue; } await fn(it); } };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+}
+// Like runPool, but an item starts only when ready(item) holds, e.g. a coverage check once its card sections are done.
+// Items that can no longer become ready (a section failed) stay as they are.
+async function runQueue(items, n, signal, fn, ready) {
+  const left = items.slice();
+  let running = 0, waiting = [];
+  const worker = async () => {
+    for (;;) {
+      if (signal.aborted) { left.splice(0).forEach(it => { it.status = 'abgebrochen'; }); return; }
+      const i = left.findIndex(ready);
+      if (i < 0) {
+        if (!running || !left.length) return;
+        await new Promise(r => waiting.push(r));
+        continue;
+      }
+      const it = left.splice(i, 1)[0];
+      running++;
+      try { await fn(it); } finally { running--; const w = waiting; waiting = []; w.forEach(r => r()); }
+    }
+  };
   await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
 }
 
@@ -1063,10 +1086,25 @@ function usableUnits(withImages) {
   return state.units.filter(u => unitText(u).length >= 3 || (withImages && pdfDocs.has(u.fileId)));
 }
 // Splits each file into chunks of about equal size, so parallel calls finish at about the same time.
-function makeChunks(units, maxChars, maxUnits) {
+// With rounds, the largest chunks (4 slides or more) are halved until their number is a multiple of RUNNING: otherwise
+// the last chunk often runs alone while the other slots wait.
+function makeChunks(units, maxChars, maxUnits, rounds) {
   const byFile = new Map();
   units.forEach(u => { if (!byFile.has(u.fileId)) byFile.set(u.fileId, []); byFile.get(u.fileId).push(u); });
-  const chunks = [];
+  const size = g => g.reduce((a, u) => a + unitText(u).length + 60, 0);
+  const halve = g => {
+    const sum = size(g);
+    let cut = 1, half = size(g.slice(0, 1));
+    while (cut < g.length - 1 && half + size([g[cut]]) <= sum / 2) { half += size([g[cut]]); cut++; }
+    return [g.slice(0, cut), g.slice(cut)];
+  };
+  const halveLargest = (groups, min) => {
+    const big = groups.filter(g => g.length >= min).sort((x, y) => size(y) - size(x))[0];
+    if (!big) return false;
+    groups.splice(groups.indexOf(big), 1, ...halve(big));
+    return true;
+  };
+  const all = [];
   for (const list of byFile.values()) {
     const lens = list.map(u => unitText(u).length + 60);
     const total = lens.reduce((a, b) => a + b, 0);
@@ -1074,15 +1112,19 @@ function makeChunks(units, maxChars, maxUnits) {
       const groups = Array.from({ length: k }, () => []);
       let acc = 0;
       list.forEach((u, i) => { groups[Math.min(k - 1, Math.floor((acc + lens[i] / 2) / (total / k)))].push(u); acc += lens[i]; });
-      return groups.filter(g => g.length);
+      // Very long slides can leave a group empty; then the largest group is halved, so there are still k chunks.
+      const out = groups.filter(g => g.length);
+      while (out.length < k && halveLargest(out, 2));
+      return out;
     };
     // Raise the number of chunks until every chunk respects the slide limit, instead of cutting off small remainders.
     let k = Math.max(1, Math.ceil(total / maxChars), Math.ceil(list.length / maxUnits));
     let groups = split(k);
     while (groups.some(g => g.length > maxUnits) && k < list.length) groups = split(++k);
-    for (const g of groups) chunks.push({ fileId: g[0].fileId, fileName: g[0].fileName, units: g, chars: g.reduce((a, u) => a + unitText(u).length + 60, 0) });
+    all.push(...groups);
   }
-  return chunks;
+  if (rounds) while (all.length % RUNNING && halveLargest(all, 4));
+  return all.map(g => ({ fileId: g[0].fileId, fileName: g[0].fileName, units: g, chars: size(g) }));
 }
 function chunkLabel(c) {
   const a = c.units[0], b = c.units[c.units.length - 1];
@@ -1675,10 +1717,14 @@ async function runCardJob(job, total, o) {
 }
 function paintCardProgress() { renderProgress('#card-progress', cardJobs, retryCardJob); }
 async function retryCardJob(job) {
-  if (job.kind === 'cov') return runCoverage();
   if (!cardCtl || cardCtl.signal.aborted) cardCtl = new AbortController();
   setCardBusy(true);
-  await runCardJob(job, cardJobs.filter(j => j.kind === 'gen').length, job.opts);
+  const o = job.opts || (cardRun ? cardRun.opts : readCardOpts());
+  if (job.kind === 'cov') await runCoverageJob(job, o);
+  else await runCardJob(job, cardJobs.filter(j => j.kind === 'gen').length, o);
+  // Coverage checks that waited for this section can run now.
+  const waiting = cardJobs.filter(j => j.kind === 'cov' && j.status === 'wartet' && j.group);
+  if (waiting.length) await runQueue(waiting, POOL, cardCtl.signal, j => runCoverageJob(j, j.opts || o), covReady);
   setCardBusy(false);
 }
 function setCardBusy(b) {
@@ -1695,7 +1741,7 @@ async function generateCards() {
   const per = o.density === 'maximal' ? 6 : o.density === 'kompakt' ? 12 : 8;
   const maxChars = o.density === 'maximal' ? 5000 : o.density === 'kompakt' ? 12000 : 7000;
   const maxUnits = o.images ? Math.max(1, Math.min(per, caps.imageMax)) : per;
-  const chunks = makeChunks(usableUnits(o.images).filter(u => inFilter(u, o.filter)), maxChars, maxUnits);
+  const chunks = makeChunks(usableUnits(o.images).filter(u => inFilter(u, o.filter)), maxChars, maxUnits, true);
   if (!chunks.length) { msg.textContent = o.filter ? `In der Auswahl (${describeFilter(o.filter)}) ist kein Material.` : 'Im Material wurde kein Text gefunden. Aktiviere „Folienbilder mitsenden“ für gescannte PDFs.'; return; }
   const t0 = Date.now();
   state.cards = []; saveCards(); renderDeck();
@@ -1722,77 +1768,94 @@ async function resumeCards() {
   if (moved.size) { state.cards.forEach(c => { if (moved.has(c.fileId)) c.fileId = moved.get(c.fileId); }); saveCards(); renderDeck(); }
   await continueCards();
 }
+// Coverage checks follow the card sections: consecutive sections of a file up to 16,000 characters or 30 slides,
+// so each check can start as soon as the sections it covers are done.
+function coverageGroups(jobs) {
+  const groups = [];
+  for (const j of jobs) {
+    const units = j.chunk.units.filter(u => unitText(u).length >= 3), chars = units.reduce((a, u) => a + unitText(u).length + 60, 0);
+    const g = groups[groups.length - 1];
+    if (g && g.fileId === j.chunk.fileId && g.chars + chars <= 16000 && g.units.length + units.length <= 30) { g.units.push(...units); g.chars += chars; g.deps.push(j.key); }
+    else groups.push({ fileId: j.chunk.fileId, fileName: j.chunk.fileName, units, chars, deps: [j.key] });
+  }
+  return groups.filter(g => g.units.length);
+}
+const covReady = job => job.kind !== 'cov' || (job.deps || []).every(k => { const d = cardJobs.find(x => x.key === k); return !d || d.status === 'fertig'; });
 async function continueCards() {
   const o = cardRun.opts, msg = $('#gen-cards-msg');
   const started = Date.now();
   if (o.filter) msg.textContent = `Auswahl: ${describeFilter(o.filter)}${o.filter.src === 'req' ? ' (aus deinen Anforderungen)' : ''}.`;
-  const todo = cardJobs.filter(j => j.status !== 'fertig');
   cardCtl = new AbortController();
+  // Speed: the coverage checks wait in the same queue as the card sections and start as soon as theirs are done,
+  // instead of after the last section.
+  if (o.coverage && !cardRun.cov && cardJobs.every(j => j.kind !== 'gen' || j.chunk)) {
+    const t = Date.now();
+    cardRun.cov = coverageGroups(cardJobs.filter(j => j.kind === 'gen')).map((g, i) => ({ key: 'c' + i + '-' + t, label: 'Abdeckung prüfen · ' + chunkLabel(g), refs: g.units.map(unitRef), deps: g.deps, done: false }));
+    saveCardRun();
+  }
+  const cov = o.coverage && cardRun.cov ? cardRun.cov.map(j => ({ kind: 'cov', key: j.key, group: j.done ? null : chunkFromRefs(j.refs), deps: j.deps || [], label: j.label, status: j.done ? 'fertig' : 'wartet', done: j.doneText || '', opts: o })) : [];
+  if (cov.some(j => !j.group && j.status !== 'fertig')) { msg.textContent = MATERIAL_GONE; return; }
+  cardJobs = cardJobs.filter(j => j.kind !== 'cov').concat(cov);
+  const todo = cardJobs.filter(j => j.status !== 'fertig');
   paintCardProgress(); setCardBusy(true); prefetchExportLib();
   // Render slide images in chunk order in the background, so the first chunk's images are ready first.
-  if (o.images) (async () => { for (const j of todo) for (const u of j.chunk.units) await claudeSlide(u.fileId, u.num); })();
-  await runPool(todo, POOL, cardCtl.signal, job => runCardJob(job, cardRun.jobs.length, o));
+  if (o.images) (async () => { for (const j of todo) if (j.kind === 'gen') for (const u of j.chunk.units) await claudeSlide(u.fileId, u.num); })();
+  await runQueue(todo, POOL, cardCtl.signal, job => job.kind === 'cov' ? runCoverageJob(job, o) : runCardJob(job, cardRun.jobs.length, o), covReady);
   paintCardProgress();
-  const failed = cardJobs.filter(j => j.status !== 'fertig').length;
-  if (!cardCtl.signal.aborted && !failed && o.coverage && state.cards.length) await runCoverage(true);
-  else if (!cardCtl.signal.aborted && !failed && !state.cards.length) cardRun.cov = [];
+  const failed = cardJobs.filter(j => j.status === 'fehler').length;
   setCardBusy(false);
   const secs = Math.round((Date.now() - started) / 1000);
   msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${karten(state.cards.length)} in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}.`;
 }
-async function runCoverage(fromGenerate) {
+// "Lücken suchen" by hand: all groups of the material at once.
+async function runCoverage() {
   if (!state.cards.length || !state.units.length) return;
   if (!caps.sample) { $('#gen-cards-msg').textContent = errText({ code: 'unavailable' }); return; }
-  const run = fromGenerate ? cardRun : null;
-  const o = Object.assign({}, run ? run.opts : readCardOpts(), { images: false });
-  if (!fromGenerate) { cardCtl = new AbortController(); setCardBusy(true); }
+  const o = readCardOpts();
+  cardCtl = new AbortController(); setCardBusy(true);
   cardJobs = cardJobs.filter(j => j.kind !== 'cov');
-  // A resumed run checks only the groups that were not finished before.
-  let jobs = run && run.cov && run.cov.length ? run.cov.map(j => ({ kind: 'cov', key: j.key, group: chunkFromRefs(j.refs), label: j.label, status: j.done ? 'fertig' : 'wartet', done: j.doneText || '' })) : null;
-  if (!jobs || jobs.some(j => !j.group && j.status !== 'fertig')) {
-    // Smaller groups than before, so several checks run in parallel instead of one long one.
-    const groups = makeChunks(usableUnits(false).filter(u => inFilter(u, o.filter)), 16000, 30);
-    const t = Date.now();
-    jobs = groups.map((g, i) => ({ kind: 'cov', key: 'c' + i + '-' + t, group: g, label: 'Abdeckung prüfen · ' + chunkLabel(g), status: 'wartet' }));
-    if (run) { run.cov = jobs.map(j => ({ key: j.key, label: j.label, refs: j.group.units.map(unitRef), done: false })); saveCardRun(); }
-  }
+  const groups = makeChunks(usableUnits(false).filter(u => inFilter(u, o.filter)), 16000, 30, true);
+  const t = Date.now();
+  const jobs = groups.map((g, i) => ({ kind: 'cov', key: 'c' + i + '-' + t, group: g, deps: [], label: 'Abdeckung prüfen · ' + chunkLabel(g), status: 'wartet', opts: o }));
   cardJobs.push(...jobs); paintCardProgress();
-  await runPool(jobs.filter(j => j.status !== 'fertig'), POOL, cardCtl.signal, async job => {
-    job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0; paintCardProgress();
-    const g = job.group;
-    const lo = g.units[0].num, hi = g.units[g.units.length - 1].num;
-    const inGroup = state.cards.filter(c => c.fileId === g.fileId && c.slide >= lo && c.slide <= hi);
-    const ids = new Set(inGroup.map(c => c.id));
-    let dupes = 0;
-    try {
-      await streamItems(coveragePrompt(g, inGroup, o), {
-        tier: o.tier, effort: EFFORT.coverage, signal: cardCtl.signal,
-        onItem: r => {
-          if (Array.isArray(r.duplicates)) {
-            r.duplicates.map(String).forEach(id => { if (ids.has(id)) { const c = state.cards.find(x => x.id === id); if (c && !c.dupe && c.type !== 'occlusion') { c.dupe = true; dupes++; } } });
-          } else {
-            const c = normalizeCards([r], g, o, true)[0];
-            if (!c) return;
-            c.job = job.key; state.cards.push(c); job.n++;
-          }
-          job.live = `+${job.n} ergänzt`;
-          scheduleDeckRender();
-        },
-      });
-      job.status = 'fertig';
-      job.done = `+${job.n} ergänzt` + (dupes ? ` · ${dupes} Dubletten` : '');
-    } catch (e) {
-      if (e && e.code === 'refused') state.cards = state.cards.filter(c => c.job !== job.key);
-      if (e && e.code === 'cancelled') job.status = 'abgebrochen';
-      else { job.status = 'fehler'; job.err = errText(e); if (e && FATAL.has(e.code)) { cardCtl.fatal = job.err; cardCtl.abort(); } }
-    }
-    sortCards(); saveCards(); saveCardRun(); renderDeck(true); paintCardProgress();
-  });
-  if (!fromGenerate) {
-    setCardBusy(false);
-    const added = state.cards.filter(c => c.added).length;
-    $('#gen-cards-msg').textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : `Abdeckung geprüft. ${added} ergänzte Karten im Deck.`;
+  await runPool(jobs, POOL, cardCtl.signal, job => runCoverageJob(job, o));
+  setCardBusy(false);
+  const added = state.cards.filter(c => c.added).length;
+  $('#gen-cards-msg').textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : `Abdeckung geprüft. ${added} ergänzte Karten im Deck.`;
+}
+async function runCoverageJob(job, opts) {
+  const o = Object.assign({}, opts, { images: false });
+  job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0; paintCardProgress();
+  const g = job.group;
+  const lo = g.units[0].num, hi = g.units[g.units.length - 1].num;
+  const inGroup = state.cards.filter(c => c.fileId === g.fileId && c.slide >= lo && c.slide <= hi);
+  // Sections the instructions excluded have no cards; their check would only bring back what was left out on purpose.
+  if (!inGroup.length) { job.status = 'fertig'; job.done = 'übersprungen'; saveCardRun(); paintCardProgress(); return; }
+  const ids = new Set(inGroup.map(c => c.id));
+  let dupes = 0;
+  try {
+    await streamItems(coveragePrompt(g, inGroup, o), {
+      tier: o.tier, effort: EFFORT.coverage, signal: cardCtl.signal,
+      onItem: r => {
+        if (Array.isArray(r.duplicates)) {
+          r.duplicates.map(String).forEach(id => { if (ids.has(id)) { const c = state.cards.find(x => x.id === id); if (c && !c.dupe && c.type !== 'occlusion') { c.dupe = true; dupes++; } } });
+        } else {
+          const c = normalizeCards([r], g, o, true)[0];
+          if (!c) return;
+          c.job = job.key; state.cards.push(c); job.n++;
+        }
+        job.live = `+${job.n} ergänzt`;
+        scheduleDeckRender();
+      },
+    });
+    job.status = 'fertig';
+    job.done = `+${job.n} ergänzt` + (dupes ? ` · ${dupes} Dubletten` : '');
+  } catch (e) {
+    if (e && e.code === 'refused') state.cards = state.cards.filter(c => c.job !== job.key);
+    if (e && e.code === 'cancelled') job.status = 'abgebrochen';
+    else { job.status = 'fehler'; job.err = errText(e); if (e && FATAL.has(e.code)) { cardCtl.fatal = job.err; cardCtl.abort(); } }
   }
+  sortCards(); saveCards(); saveCardRun(); renderDeck(true); paintCardProgress();
 }
 
 /* ---------- Deck-Ansicht ---------- */
@@ -2714,28 +2777,76 @@ function scheduleQuizPaint() { if (!quizPaintTimer) quizPaintTimer = setTimeout(
 const EXAM_CHUNK = { units: [], fileName: '' };
 async function runQuizJob(job, o) {
   job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0;
-  pendingQuestions = pendingQuestions.filter(q => q.job !== job.key);
+  const lq = liveQuiz();
+  // In a running quiz a retried part only asks for what it has not delivered yet.
+  const { plan, tfTrue } = lq && !job.tasks ? missingPlan(lq, job) : { plan: job.plan, tfTrue: job.tfTrue };
+  if (lq && !job.tasks && !Object.values(plan).some(Boolean)) { job.status = 'fertig'; job.done = 'vollständig'; saveQuizRun(); paintQuizProgress(); return; }
+  if (!lq) pendingQuestions = pendingQuestions.filter(q => q.job !== job.key);
   paintQuizProgress();
   const unit = job.tasks ? ' Aufgaben' : ' Fragen';
   try {
-    await streamItems(job.tasks ? examPrompt(job.tasks, o) : quizPrompt(job.chunk, job.plan, job.tfTrue, o), {
+    await streamItems(job.tasks ? examPrompt(job.tasks, o) : quizPrompt(job.chunk, plan, tfTrue, o), {
       tier: o.tier, effort: job.tasks ? EFFORT.exam : EFFORT.quiz, signal: quizCtl.signal,
       onItem: r => {
         const q = normalizeQuestions([r], job.chunk || EXAM_CHUNK, o)[0];
         if (!q) return;
         q.job = job.key; pendingQuestions.push(q);
         job.n++; job.live = job.n + unit;
-        scheduleQuizPaint();
+        scheduleQuizPaint(); feedLive(q);
       },
     });
     if (!job.n) throw { code: 'bad_shape' };
     job.status = 'fertig'; job.done = job.n + unit + (job.tasks && job.n < job.tasks.length ? ` von ${job.tasks.length}` : '');
   } catch (e) {
-    if (e && e.code === 'refused') pendingQuestions = pendingQuestions.filter(q => q.job !== job.key);
+    if (e && e.code === 'refused') { pendingQuestions = pendingQuestions.filter(q => q.job !== job.key); dropLive(job.key); }
     if (e && e.code === 'cancelled') job.status = 'abgebrochen';
     else { job.status = 'fehler'; job.err = errText(e) + (job.n && e.code !== 'refused' ? ` (${job.n} Fragen sind schon da)` : ''); if (e && FATAL.has(e.code)) { quizCtl.fatal = job.err; quizCtl.abort(); } }
   }
-  saveQuizRun(); paintQuizProgress();
+  saveQuizRun(); paintQuizProgress(); scheduleLiveRefresh();
+}
+// The quiz that is already running while its questions are still being written, if any.
+function liveQuiz() {
+  const qz = state.quiz;
+  return qz && qz.gen && quizRun && qz.gen.run === quizRun.id && !qz.submitted ? qz : null;
+}
+function missingPlan(qz, job) {
+  const plan = Object.assign({}, job.plan);
+  let tfTrue = job.tfTrue;
+  qz.questions.filter(q => q._job === job.key).forEach(q => { if (plan[q.type] > 0) plan[q.type]--; if (q.type === 'tf' && q.answer === true) tfTrue--; });
+  return { plan, tfTrue: Math.max(0, Math.min(plan.tf || 0, tfTrue)) };
+}
+function feedLive(q) {
+  const qz = liveQuiz();
+  if (qz) { const c = Object.assign({}, q, { _job: q.job }); delete c.job; qz.questions.push(c); saveQuiz(); scheduleLiveRefresh(); return; }
+  if (!state.quiz && quizRun && quizRun.live && quizGenActive) startQuiz(true);
+}
+function dropLive(jobKey) {
+  const qz = liveQuiz();
+  if (!qz) return;
+  const cur = qz.questions[qz.idx];
+  qz.questions = qz.questions.filter(q => q._job !== jobKey);
+  qz.idx = Math.max(0, Math.min(qz.questions.indexOf(cur) >= 0 ? qz.questions.indexOf(cur) : qz.idx, qz.questions.length - 1));
+  saveQuiz();
+}
+// Ends the background writing of a running quiz: all parts done, quiz handed in or ended.
+function endLive(qz, abort) {
+  if (abort && quizGenActive && quizCtl) quizCtl.abort();
+  qz.questions.forEach(q => { delete q._job; });
+  delete qz.gen;
+  quizRun = null; pendingQuestions = []; saveQuizRun(); saveQuiz();
+}
+let liveTimer = 0;
+function scheduleLiveRefresh() {
+  if (liveTimer) return;
+  liveTimer = setTimeout(() => {
+    liveTimer = 0;
+    const qz = state.quiz;
+    if (!qz || qz.submitted || $('#quiz-run').hidden) return;
+    // Redraw without losing the place in an answer being typed.
+    const a = document.activeElement, keep = a && a.tagName === 'TEXTAREA' && a.id ? [a.id, a.selectionStart, a.selectionEnd] : null;
+    renderQuestion();
+    if (keep) { const t = document.getElementById(keep[0]); if (t) { t.focus(); t.setSelectionRange(keep[1], keep[2]); } }
+  }, 400);
 }
 async function retryQuizJob(job) {
   if (!quizCtl || quizCtl.signal.aborted) quizCtl = new AbortController();
@@ -2761,10 +2872,10 @@ async function generateQuiz(override) {
   if (!o.types.length) { msg.textContent = 'Wähle mindestens einen Fragetyp.'; return; }
   if (!state.units.length) { msg.textContent = 'Lade zuerst links Vorlesungsmaterial.'; return; }
   if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }
-  // Split into at least as many parts as calls can run at once (each part gets 4 or more questions).
+  // Split into as many parts as calls really run at once (each part gets about 4 or more questions).
   const units = usableUnits(false).filter(u => inFilter(u, o.filter));
   const total = units.reduce((a, u) => a + unitText(u).length + 60, 0);
-  const parts = Math.max(1, Math.ceil(total / 40000), Math.min(POOL, Math.floor(o.count / 4)));
+  const parts = Math.max(1, Math.ceil(total / 40000), Math.min(RUNNING, Math.ceil(o.count / 4)));
   const chunks = makeChunks(units, Math.ceil(total / parts) + 1, 1000);
   if (!chunks.length) { msg.textContent = o.filter ? `In der Auswahl (${describeFilter(o.filter)}) ist kein Material.` : 'Im Material wurde kein Text gefunden.'; return; }
   const quotas = largestRemainder(o.count, chunks.map(c => c.chars));
@@ -2781,7 +2892,8 @@ async function generateQuiz(override) {
     jobs.push({ key: 'z' + i + '-' + Date.now(), chunk, plan, tfTrue, opts: o, label: chunkLabel(chunk) + ' · ' + quotas[i] + ' Fragen', status: 'wartet' });
   });
   quizJobs = jobs; pendingQuestions = [];
-  quizRun = { opts: o, jobs: jobs.map(j => ({ key: j.key, label: j.label, refs: j.chunk.units.map(unitRef), plan: j.plan, tfTrue: j.tfTrue, done: false })), questions: [] };
+  // Speed: a normal quiz starts with its first finished question; practice exams with a time limit or fixed order wait for all.
+  quizRun = { id: 'q' + Date.now(), live: !o.timeLimitMin && !o.keepOrder, want: o.count, opts: o, jobs: jobs.map(j => ({ key: j.key, label: j.label, refs: j.chunk.units.map(unitRef), plan: j.plan, tfTrue: j.tfTrue, done: false })), questions: [] };
   saveQuizRun();
   await continueQuiz();
 }
@@ -2795,23 +2907,46 @@ async function resumeQuiz() {
   pendingQuestions = quizRun.questions || [];
   await continueQuiz();
 }
+let quizGenActive = false;
 async function continueQuiz() {
   const o = quizRun.opts;
   quizCtl = new AbortController();
   setQuizBusy(true); paintQuizProgress();
-  await runPool(quizJobs.filter(j => j.status !== 'fertig'), POOL, quizCtl.signal, job => runQuizJob(job, o));
+  quizGenActive = true;
+  try { await runPool(quizJobs.filter(j => j.status !== 'fertig'), POOL, quizCtl.signal, job => runQuizJob(job, o)); }
+  finally { quizGenActive = false; }
   setQuizBusy(false); paintQuizProgress();
+  // Handed in or ended while questions were still being written: nothing more to start.
+  if (!quizRun) return;
+  const lq = liveQuiz();
+  if (lq) {
+    if (quizJobs.every(j => j.status === 'fertig')) endLive(lq);
+    else saveQuiz();
+    scheduleLiveRefresh();
+    return;
+  }
   afterQuizGen();
   if (pendingQuestions.length && quizJobs.every(j => j.status === 'fertig')) startQuiz();
 }
-function startQuiz() {
+// Writing parts that failed or stopped (also after the page was closed) continue into the running quiz.
+async function fillLiveQuiz() {
+  if (!liveQuiz() || quizGenActive) return;
+  const o = quizRun.opts;
+  quizJobs = quizRun.jobs.map(j => ({ key: j.key, chunk: j.refs ? chunkFromRefs(j.refs) : null, tasks: null, plan: j.plan, tfTrue: j.tfTrue, opts: o, label: j.label, status: j.done ? 'fertig' : 'wartet', done: j.doneText || '' }));
+  if (quizJobs.some(j => !j.chunk && j.status !== 'fertig')) { const n = $('#quiz-gen'); if (n) n.textContent = MATERIAL_GONE; return; }
+  pendingQuestions = quizRun.questions || [];
+  scheduleLiveRefresh();
+  await continueQuiz();
+}
+function startQuiz(live) {
   const o = quizJobs.length ? quizJobs[0].opts : readQuizOpts();
   const title = o.title || $('#lecture').value.trim() || $('#course').value.trim() || 'Quiz';
   if (o.filter && o.filter.src === 'weak') o.keepOrder = false;
-  const qs = pendingQuestions.map(q => { const c = Object.assign({}, q); delete c.job; return c; });
+  const qs = pendingQuestions.map(q => { const c = Object.assign({}, q); if (live) c._job = q.job; delete c.job; return c; });
   // A practice exam keeps the order of its model exam; quizzes are shuffled.
   state.quiz = newQuizState(o.keepOrder ? qs.sort((a, b) => (a.task || 999) - (b.task || 999)) : shuffle(qs), o, title, o.timeLimitMin);
-  quizRun = null; saveQuizRun();
+  if (live) state.quiz.gen = { run: quizRun.id, want: quizRun.want || qs.length };
+  else { quizRun = null; saveQuizRun(); }
   saveQuiz(); showQuizView();
 }
 function newQuizState(questions, o, title, timeLimitMin) {
@@ -2961,7 +3096,7 @@ async function gradeOpen(q) {
   const qz = state.quiz;
   const ans = String(qz.answers[q.id] || '').trim();
   const max = maxOf(q);
-  if (!ans) { qz.results[q.id] = { score: 0, max, awarded: q.rubric.map(() => ({ reached: 0, comment: '' })), feedback: 'Keine Antwort abgegeben.' }; saveQuiz(); return; }
+  if (!ans) { qz.results[q.id] = { score: 0, max, awarded: q.rubric.map(() => ({ reached: 0, comment: '' })), feedback: 'Keine Antwort abgegeben.', ans }; saveQuiz(); return; }
   const res = await askJSON(gradePrompt(q, ans), { tier: 'default', effort: EFFORT.grade });
   if (!res || !Array.isArray(res.awarded)) throw { code: 'bad_shape' };
   const awarded = q.rubric.map((r, i) => {
@@ -2969,8 +3104,26 @@ async function gradeOpen(q) {
     const reached = Math.max(0, Math.min(r.points, Math.round((Number(a.reached) || 0) * 2) / 2));
     return { reached, comment: String(a.comment || '').trim() };
   });
-  qz.results[q.id] = { score: awarded.reduce((s, a) => s + a.reached, 0), max, awarded, feedback: String(res.feedback || '').trim() };
+  qz.results[q.id] = { score: awarded.reduce((s, a) => s + a.reached, 0), max, awarded, feedback: String(res.feedback || '').trim(), ans };
   saveQuiz();
+}
+// An open answer needs (new) grading when it has no result yet or was changed after grading.
+const needsGrade = (qz, q) => q.type === 'open' && (!qz.results[q.id] || (qz.results[q.id].ans != null && qz.results[q.id].ans !== String(qz.answers[q.id] || '').trim()));
+// Speed: in exam mode an open answer is graded in the background once the student moves on, so handing in is quick.
+const grading = new Map();
+function gradeNow(q) {
+  const qz = state.quiz;
+  if (!grading.has(q.id)) {
+    if (!needsGrade(qz, q)) return Promise.resolve();
+    grading.set(q.id, gradeOpen(q).finally(() => grading.delete(q.id)));
+  }
+  return grading.get(q.id).then(() => (needsGrade(qz, q) ? gradeNow(q) : undefined));
+}
+function pregrade() {
+  const qz = state.quiz;
+  if (!qz || qz.submitted || qz.settings.mode === 'lern') return;
+  const cur = qz.questions[qz.idx];
+  for (const q of qz.questions) if (q !== cur && q.type === 'open' && String(qz.answers[q.id] || '').trim() && !grading.has(q.id) && needsGrade(qz, q)) gradeNow(q).catch(() => {});
 }
 
 /* ---------- Quiz: Ansicht ---------- */
@@ -3025,7 +3178,7 @@ function renderQuestion() {
       q.level ? el('span', { class: 'chip', text: q.level }) : null,
       el('span', { class: 'topic', text: q.topic + (q.slide ? ' · Folie ' + q.slide : '') }),
       qz.timeLimitMin ? el('span', { class: 'clock', id: 'quiz-clock' }) : null),
-    el('button', { type: 'button', class: 'btn small ghost', onclick: e => armConfirm(e.currentTarget, 'Quiz wirklich beenden?', () => { state.quiz = null; saveQuiz(); showQuizView(); }) }, 'Quiz beenden'));
+    el('button', { type: 'button', class: 'btn small ghost', onclick: e => armConfirm(e.currentTarget, 'Quiz wirklich beenden?', () => { if (liveQuiz()) endLive(qz, true); state.quiz = null; saveQuiz(); showQuizView(); }) }, 'Quiz beenden'));
   let body;
   const name = 'ans-' + q.id;
   if (q.type === 'tf') {
@@ -3061,6 +3214,13 @@ function renderQuestion() {
   const status = el('p', { class: 'msg', role: 'status' });
   const fb = shown ? feedbackBlock(q) : null;
   const last = qz.idx === qz.questions.length - 1;
+  const lq = liveQuiz(), coming = !!lq && quizGenActive;
+  const genNote = !lq ? null : el('p', { id: 'quiz-gen', class: 'hint', role: 'status' }, coming
+    ? `Weitere Fragen werden erstellt: ${qz.questions.length} von ${qz.gen.want} sind da.`
+    : `${qz.questions.length} von ${qz.gen.want} Fragen sind da. `,
+    coming ? null : el('button', { type: 'button', class: 'btn small', onclick: e => { e.currentTarget.disabled = true; fillLiveQuiz(); } }, 'Fehlende Fragen erstellen'),
+    coming ? null : el('button', { type: 'button', class: 'btn small ghost', onclick: () => { endLive(qz); renderQuestion(); } }, 'Ohne sie weitermachen'));
+  pregrade();
   const nav = el('div', { class: 'actions' },
     el('button', { type: 'button', class: 'btn', disabled: qz.idx === 0 || null, onclick: () => { qz.idx--; saveQuiz(); renderQuestion(); } }, 'Zurück'));
   if (learn && !shown) {
@@ -3068,7 +3228,7 @@ function renderQuestion() {
       if (q.type === 'open') {
         if (!isAnswered(q)) { status.textContent = 'Schreib zuerst eine Antwort.'; return; }
         const b = e.currentTarget; b.disabled = true; status.className = 'msg'; status.textContent = 'Claude bewertet deine Antwort …';
-        try { await gradeOpen(q); } catch (err) { b.disabled = false; status.className = 'msg err'; status.textContent = errText(err); return; }
+        try { await gradeNow(q); } catch (err) { b.disabled = false; status.className = 'msg err'; status.textContent = errText(err); return; }
       } else if (q.type === 'block') { if (!Array.isArray(qz.answers[q.id])) qz.answers[q.id] = []; }
       else if (!isAnswered(q)) { status.textContent = 'Wähle zuerst eine Antwort.'; return; }
       qz.checked[q.id] = true; saveQuiz(); renderQuestion();
@@ -3076,11 +3236,14 @@ function renderQuestion() {
     nav.append(el('button', { type: 'button', class: 'btn ghost', onclick: () => { qz.checked[q.id] = true; if (q.type === 'open' && !qz.results[q.id]) qz.results[q.id] = { score: 0, max: maxOf(q), awarded: q.rubric.map(() => ({ reached: 0, comment: '' })), feedback: 'Übersprungen.' }; saveQuiz(); renderQuestion(); } }, 'Lösung zeigen'));
   } else if (!last) {
     nav.append(el('button', { type: 'button', class: 'btn primary', onclick: () => { qz.idx++; saveQuiz(); renderQuestion(); } }, 'Weiter'));
+  } else if (coming) {
+    nav.append(el('button', { type: 'button', class: 'btn primary', disabled: true, title: 'Die nächste Frage wird gerade geschrieben.' }, 'Weiter'));
   }
-  if (last && (!learn || shown)) nav.append(el('button', { type: 'button', class: 'btn primary', onclick: e => submitQuiz(e.currentTarget, status) }, learn ? 'Auswertung' : 'Abgeben'));
+  if (last && (!learn || shown) && !coming) nav.append(el('button', { type: 'button', class: 'btn primary', onclick: e => submitQuiz(e.currentTarget, status) }, learn ? 'Auswertung' : 'Abgeben'));
   else if (!learn) nav.append(el('button', { type: 'button', class: 'btn ghost', onclick: e => submitQuiz(e.currentTarget, status) }, 'Abgeben'));
   fill(box, head, dots,
     qz.settings.rules && qz.settings.rules.length && qz.idx === 0 ? el('details', { class: 'method' }, el('summary', { text: 'Hinweise zur Klausur' }), el('ul', {}, ...qz.settings.rules.map(r => el('li', { text: r })))) : null,
+    genNote,
     q.stimulus ? stimulusView(q.stimulus) : null,
     el('p', { class: 'qtext', text: q.type === 'tf' ? q.statement : q.question }),
     instr ? el('p', { class: 'qinstr', text: instr }) : null,
@@ -3133,7 +3296,7 @@ async function gradeMany(qs, onProgress) {
   const items = qs.map(q => ({ q, status: 'wartet' }));
   if (onProgress) onProgress(0, qs.length);
   await runPool(items, POOL, ctl.signal, async it => {
-    try { await gradeOpen(it.q); }
+    try { await gradeNow(it.q); }
     catch (e) { firstErr = firstErr || e; if (e && FATAL.has(e.code)) ctl.abort(); }
     done++; if (onProgress) onProgress(done, qs.length);
   });
@@ -3246,11 +3409,14 @@ function renderWeakPanel() {
 async function submitQuiz(btn, status, timedOut) {
   const qz = state.quiz;
   if (!qz || qz.submitted) return;
-  const open = qz.questions.filter(q => q.type === 'open' && !qz.results[q.id]);
+  if (liveQuiz()) endLive(qz, true);
   if (btn) btn.disabled = true;
   status = status || el('p');
   if (timedOut) qz.timedOut = true;
   status.className = 'msg';
+  // Gradings already running in the background are waited for, the rest is graded now.
+  if (grading.size) { status.textContent = 'Claude bewertet offene Antworten …'; await Promise.all(Array.from(grading.values()).map(p => p.catch(() => {}))); }
+  const open = qz.questions.filter(q => needsGrade(qz, q));
   const err = await gradeMany(open, (d, n) => { if (n) status.textContent = `Claude bewertet offene Antworten (${d}/${n}) …`; });
   if (err) { status.className = 'msg err'; status.textContent = errText(err); }
   qz.submitted = true; logQuiz(qz); saveQuiz(); showQuizView();
@@ -3947,7 +4113,7 @@ function bind() {
     if (state.cards.length) armConfirm(e.currentTarget, 'Aktuelles Deck ersetzen?', generateCards); else generateCards();
   });
   $('#stop-cards').addEventListener('click', () => cardCtl && cardCtl.abort());
-  $('#run-coverage').addEventListener('click', () => runCoverage(false));
+  $('#run-coverage').addEventListener('click', () => runCoverage());
   $('#card-search').addEventListener('input', e => { view.search = e.target.value.trim(); renderCardList(); });
   $('#add-card').addEventListener('click', addCard);
   $('#add-occlusion').addEventListener('click', addOcclusion);
@@ -3999,7 +4165,7 @@ function bind() {
   $('#exam-subject').addEventListener('input', e => { store.set('examSubject', e.target.value); renderExamPanel(); });
   $('#course').addEventListener('input', () => { if (!$('#exam-subject').value.trim()) renderExamPanel(); });
   $('#stop-quiz').addEventListener('click', () => quizCtl && quizCtl.abort());
-  $('#start-quiz').addEventListener('click', startQuiz);
+  $('#start-quiz').addEventListener('click', () => startQuiz());
   $('#quiz-load').addEventListener('change', e => { if (e.target.files[0]) loadQuizFile(e.target.files[0]); e.target.value = ''; });
   // Closing the tool ends every running call. Save what streamed in so far; the run continues from there via „Fortsetzen“.
   const saveProgress = () => { saveCards(); saveCardRun(); saveQuizRun(); };

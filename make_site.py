@@ -141,6 +141,7 @@ const usage = { cost: 0 };
 // Over the API every section of a typical lecture can run at once; the SDK waits and retries
 // on rate limits and overloads by itself (new accounts start with lower limits).
 const POOL = 8;
+const RUNNING = POOL;
 // Card writing is extraction, so little thinking is needed; checks and distractors get a bit more.
 const EFFORT = { cards: 'low', coverage: 'medium', quiz: 'medium', grade: 'low' };
 const FATAL = new Set(['no_key', 'auth', 'permission', 'spend_cap', 'billing', 'model']);
