@@ -421,13 +421,18 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
               <div class="icard-front">Welche Methoden der Reliabilitätsschätzung gibt es? (4)</div>
               <div class="icard-back"><ul><li><b>Retest-Reliabilität</b>: derselbe Test zu zwei Zeitpunkten → Stabilität</li><li><b>Paralleltest-Reliabilität</b>: zwei äquivalente Testformen</li><li><b>Testhalbierung</b> (Split-Half): Korrelation zweier Testhälften</li><li><b>Interne Konsistenz</b>: z. B. Cronbachs α</li></ul></div>
             </article>
+            <div class="actions">
+              <span class="hint">Oder leg Karten selbst an:</span>
+              <button type="button" id="add-card-empty" class="btn small">Karte hinzufügen</button>
+              <button type="button" id="add-occlusion-empty" class="btn small">Bildverdeckung</button>
+            </div>
           </div>
           <div id="deck-body" hidden>
             <div id="coverage" class="cov"></div>
             <div class="deck-tools">
               <input type="search" id="card-search" placeholder="Karten durchsuchen" aria-label="Karten durchsuchen">
               <button type="button" id="add-card" class="btn small">Karte hinzufügen</button>
-              <button type="button" id="add-occlusion" class="btn small" title="Beschriftungen einer PDF-Folie verdecken">Bildverdeckung</button>
+              <button type="button" id="add-occlusion" class="btn small">Bildverdeckung</button>
               <button type="button" id="run-coverage" class="btn small">Lücken suchen</button>
               <button type="button" id="drop-dupes" class="btn small" hidden>Dubletten entfernen</button>
               <button type="button" id="drop-known" class="btn small" hidden>Schon vorhandene entfernen</button>
@@ -634,6 +639,7 @@ function stripHtml(html) {
 }
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 const fmt = n => (Math.round(n * 10) / 10).toLocaleString('de-DE');
+const karten = n => n + (n === 1 ? ' Karte' : ' Karten');
 let seq = store.get('seq', 0);
 const newId = p => p + (++seq).toString(36) + (store.set('seq', seq) ? '' : '');
 function newGuid() {
@@ -1539,7 +1545,7 @@ function renderLibrary() {
   $('#lib-count').textContent = ok.length ? `(${ok.length} ${ok.length === 1 ? 'Deck' : 'Decks'}, ${ok.reduce((a, d) => a + d.notes, 0).toLocaleString('de-DE')} Karten)` : '';
   fill($('#lib-list'), ...state.library.map(d => el('li', { class: 'file' },
     el('span', { class: 'file-name', text: d.deck || d.file }),
-    el('span', { class: 'file-meta' + (d.status === 'error' ? ' err' : ''), text: d.status === 'lädt' ? 'wird gelesen …' : d.status === 'error' ? d.error : `${d.notes} Karten · Vorderseite ~${d.stats.front} Zeichen, Rückseite ~${d.stats.back} Zeichen · ${Math.round(d.stats.list * 100)} % Listen` }),
+    el('span', { class: 'file-meta' + (d.status === 'error' ? ' err' : ''), text: d.status === 'lädt' ? 'wird gelesen …' : d.status === 'error' ? d.error : `${karten(d.notes)} · Vorderseite ~${d.stats.front} Zeichen, Rückseite ~${d.stats.back} Zeichen · ${Math.round(d.stats.list * 100)} % Listen` }),
     d.status === 'lädt' ? null : el('button', { type: 'button', class: 'btn small ghost', 'aria-label': (d.deck || d.file) + ' entfernen', onclick: () => { state.library = state.library.filter(x => x !== d); knownChanged(); saveLibrary(); renderLibrary(); renderDeck(true); } }, 'Entfernen'))));
   $('#opt-libstyle').disabled = !ok.length;
 }
@@ -1637,7 +1643,7 @@ function renderExportHistory() {
   const box = $('#export-history');
   box.hidden = !mine.length;
   fill(box, mine.length ? el('details', { class: 'method' }, el('summary', { text: `Bisherige Exporte${course ? ' für ' + course : ''} (${mine.length})` }),
-    el('ul', {}, ...mine.map(h => el('li', { text: `${h.date}: ${h.deck} · ${h.count} Karten` })))) : null);
+    el('ul', {}, ...mine.map(h => el('li', { text: `${h.date}: ${h.deck} · ${karten(h.count)}` })))) : null);
 }
 function coveragePrompt(group, cardsInGroup, o) {
   const list = cardsInGroup.map(c => `${c.id} | ${c.slide || '-'} | ${stripHtml(c.front).slice(0, 140)} → ${c.type === 'occlusion' ? 'Bildverdeckung: ' + c.occ.rects.map(r => r.label).filter(Boolean).join(', ').slice(0, 160) : stripHtml(c.back).slice(0, 100)}`).join('\n');
@@ -1763,7 +1769,7 @@ function renderCardResume() {
   const left = cardRunLeft(), total = cardRun.jobs.length;
   const what = left.gen ? `${total - left.gen} von ${total} Abschnitten fertig` : 'alle Abschnitte fertig, die Abdeckungsprüfung fehlt noch';
   fill(box,
-    el('span', { text: `Unterbrochener Lauf: ${what}. ${state.cards.length} Karten sind gesichert.` + (cardRun.opts.images && !pdfDocs.size ? ' Folienbilder gehen nur mit, wenn du die PDF vorher links erneut lädst.' : '') }),
+    el('span', { text: `Unterbrochener Lauf: ${what}. ${karten(state.cards.length)} ${state.cards.length === 1 ? 'ist' : 'sind'} gesichert.` + (cardRun.opts.images && !pdfDocs.size ? ' Folienbilder gehen nur mit, wenn du die PDF vorher links erneut lädst.' : '') }),
     el('button', { type: 'button', class: 'btn small primary', onclick: resumeCards }, 'Fortsetzen'),
     el('button', { type: 'button', class: 'btn small ghost', onclick: () => { cardRun = null; saveCardRun(); renderCardResume(); } }, 'Nicht fortsetzen'));
 }
@@ -1828,7 +1834,7 @@ async function runCardJob(job, total, o) {
           if (o.occlusion && o.images && images) pending.push(occlusionFromClaude(r, job.chunk).then(c => {
             if (!c || job.run !== run) return;
             c.job = job.key; state.cards.push(c);
-            job.n++; job.live = job.n + ' Karten';
+            job.n++; job.live = karten(job.n);
             scheduleDeckRender();
           }).catch(() => {}));
           return;
@@ -1836,19 +1842,19 @@ async function runCardJob(job, total, o) {
         const c = normalizeCards([r], job.chunk, o, false)[0];
         if (!c) return;
         c.job = job.key; state.cards.push(c);
-        job.n++; job.live = job.n + ' Karten';
+        job.n++; job.live = karten(job.n);
         scheduleDeckRender();
       },
     });
     await Promise.all(pending);
     if (!job.n && !job.skip) throw { code: 'bad_shape' };
-    job.status = 'fertig'; job.done = !job.n ? 'übersprungen: ' + job.skip : job.n + ' Karten' + (res.truncated ? ' (gekürzt, Lückensuche ergänzt den Rest)' : '');
+    job.status = 'fertig'; job.done = !job.n ? 'übersprungen: ' + job.skip : karten(job.n) + (res.truncated ? ' (gekürzt, Lückensuche ergänzt den Rest)' : '');
   } catch (e) {
     await Promise.all(pending);
     // Cards that streamed in before a failure are complete and stay; a refusal withdraws them.
     if (e && e.code === 'refused') state.cards = state.cards.filter(c => c.job !== job.key);
     if (e && e.code === 'cancelled') job.status = 'abgebrochen';
-    else { job.status = 'fehler'; job.err = errText(e) + (job.n && e.code !== 'refused' ? ` (${job.n} Karten sind schon da)` : ''); if (e && FATAL.has(e.code)) { cardCtl.fatal = job.err; cardCtl.abort(); } }
+    else { job.status = 'fehler'; job.err = errText(e) + (job.n && e.code !== 'refused' ? ` (${karten(job.n)} ${job.n === 1 ? 'ist' : 'sind'} schon da)` : ''); if (e && FATAL.has(e.code)) { cardCtl.fatal = job.err; cardCtl.abort(); } }
   }
   sortCards(); saveCards(); saveCardRun(); renderDeck(true); paintCardProgress();
 }
@@ -1917,7 +1923,7 @@ async function continueCards() {
   else if (!cardCtl.signal.aborted && !failed && !state.cards.length) cardRun.cov = [];
   setCardBusy(false);
   const secs = Math.round((Date.now() - started) / 1000);
-  msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${state.cards.length} Karten in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}${costNote(cost0)}.`;
+  msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${karten(state.cards.length)} in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}${costNote(cost0)}.`;
 }
 async function runCoverage(fromGenerate) {
   if (!state.cards.length || !state.units.length) return;
@@ -1984,25 +1990,31 @@ function renderDeck(soft) {
   const has = state.cards.length > 0;
   $('#deck-empty').hidden = has;
   $('#deck-body').hidden = !has;
+  const done = state.cards.filter(c => !c.draft);
   const s = { basic: 0, reverse: 0, cloze: 0, occlusion: 0 };
-  state.cards.forEach(c => { s[c.type] = (s[c.type] || 0) + 1; });
+  done.forEach(c => { s[c.type] = (s[c.type] || 0) + 1; });
+  const ioNotes = noteCount(done.filter(c => c.type === 'occlusion'));
   markKnown();
   const dupes = state.cards.filter(c => c.dupe).length;
   const known = state.cards.filter(c => c.known).length;
   const added = state.cards.filter(c => c.added).length;
-  fill($('#deck-stats'), ...(has ? [
-    el('span', {}, el('b', { text: state.cards.length }), ' Karten'),
-    el('span', {}, el('b', { text: s.basic }), ' Frage – Antwort'),
+  fill($('#deck-stats'), ...(done.length ? [
+    el('span', {}, el('b', { text: done.length }), done.length === 1 ? ' Karte' : ' Karten'),
+    s.basic ? el('span', {}, el('b', { text: s.basic }), ' Frage – Antwort') : null,
     s.reverse ? el('span', {}, el('b', { text: s.reverse }), ' Umkehr') : null,
     s.cloze ? el('span', {}, el('b', { text: s.cloze }), ' Lückentext') : null,
-    s.occlusion ? el('span', {}, el('b', { text: s.occlusion }), ` Bildverdeckung (${noteCount(state.cards.filter(c => c.type === 'occlusion'))} Anki-Karten)`) : null,
+    s.occlusion ? el('span', {}, el('b', { text: s.occlusion }), ` Bildverdeckung (${ioNotes} ${ioNotes === 1 ? 'Anki-Karte' : 'Anki-Karten'})`) : null,
     added ? el('span', {}, el('b', { text: added }), ' ergänzt') : null,
   ] : []));
   $('#drop-dupes').hidden = !dupes;
   $('#drop-dupes').textContent = `Dubletten entfernen (${dupes})`;
   $('#drop-known').hidden = !known;
   $('#drop-known').textContent = `Schon vorhandene entfernen (${known})`;
-  $('#add-occlusion').disabled = !state.files.some(f => pdfDocs.has(f.id));
+  const canOcclude = state.files.some(f => pdfDocs.has(f.id));
+  for (const b of [$('#add-occlusion'), $('#add-occlusion-empty')]) {
+    b.disabled = !canOcclude;
+    b.title = canOcclude ? 'Beschriftungen einer PDF-Folie verdecken' : 'Braucht eine PDF, die links geladen ist';
+  }
   renderExportHistory();
   if (!has) return;
   renderCoverage();
@@ -2053,7 +2065,7 @@ function renderCardList() {
   if (view.slide) { const [fid, num] = view.slide.split(':'); const f = state.files.find(x => String(x.id) === fid); parts.push(`${f ? f.name + ' · ' : ''}Folie ${num}`); }
   if (view.search) parts.push(`Suche „${view.search}“`);
   note.hidden = !parts.length;
-  if (parts.length) fill(note, `${list.length} von ${state.cards.length} Karten · ${parts.join(' · ')} `, el('button', { type: 'button', class: 'btn small ghost', onclick: () => { view.slide = null; view.search = ''; $('#card-search').value = ''; renderCoverage(); renderCardList(); } }, 'Filter aufheben'));
+  if (parts.length) fill(note, `${list.length} von ${karten(state.cards.length)} · ${parts.join(' · ')} `, el('button', { type: 'button', class: 'btn small ghost', onclick: () => { view.slide = null; view.search = ''; $('#card-search').value = ''; renderCoverage(); renderCardList(); } }, 'Filter aufheben'));
   const shown = list.slice(0, 400);
   fill($('#card-list'), ...shown.map(c => view.editing === c.id ? (c.type === 'occlusion' ? occlusionEditor(c) : cardEditor(c)) : cardView(c)),
     list.length > shown.length ? el('p', { class: 'hint', text: `${list.length - shown.length} weitere Karten ausgeblendet. Nutze Suche oder Folienfilter.` }) : null);
@@ -2176,6 +2188,9 @@ function rectId(rects) {
   do id = 'r' + Math.random().toString(36).slice(2, 7); while (rects.some(r => r.id === id));
   return id;
 }
+// Tiny print (below about 7 pt on a slide: axis ticks, indices, chart captions) gets no frame in the editor;
+// a drawn area still takes it in as solution.
+const IO_MIN_H = 0.016;
 const covers = (r, b) => {
   const ix = Math.min(r.x + r.w, b.x + b.w) - Math.max(r.x, b.x), iy = Math.min(r.y + r.h, b.y + b.h) - Math.max(r.y, b.y);
   return ix > 0 && iy > 0 && ix * iy >= 0.6 * b.w * b.h;
@@ -2325,7 +2340,7 @@ function occlusionEditor(c) {
   const err = el('p', { class: 'msg err', role: 'status' });
   const fileOf = () => pdfs.find(f => String(f.id) === fileSel.value);
   const draw = () => {
-    const cands = boxes.filter(b => !rects.some(r => covers(r, b)));
+    const cands = boxes.filter(b => b.h >= IO_MIN_H && !rects.some(r => covers(r, b)));
     fill(layer, ...cands.map(b => el('div', { class: 'io-cand', style: boxStyle(b), title: b.text, 'data-cand': boxes.indexOf(b) })),
       ...rects.map((r, i) => el('div', { class: 'io-mask', style: boxStyle(r), title: (r.label || 'Fläche ' + (i + 1)) + ' (Klick hebt die Verdeckung auf)', 'data-mask': i }, String(i + 1))));
     fill(list, ...rects.map((r, i) => {
@@ -2358,7 +2373,7 @@ function occlusionEditor(c) {
   layer.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
     start = Object.assign(pos(e), { target: e.target });
-    layer.setPointerCapture(e.pointerId);
+    try { layer.setPointerCapture(e.pointerId); } catch {}
     e.preventDefault();
   });
   layer.addEventListener('pointermove', e => {
@@ -2396,10 +2411,10 @@ function occlusionEditor(c) {
       el('label', {}, el('span', { class: 'lbl', text: 'Folie' }), slideIn),
       el('label', {}, el('span', { class: 'lbl', text: 'Abfrage' }), modeSel)),
     el('label', {}, el('span', { class: 'lbl', text: 'Aufgabe auf der Vorderseite' }), head),
-    el('p', { class: 'hint', text: 'Klick auf einen Text verdeckt ihn, ein zweiter Klick deckt ihn wieder auf. Für Stellen ohne Text ziehst du eine Fläche auf. Jede Fläche wird eine eigene Karte. Neue Folie gewählt: die Flächen beginnen von vorn.' }),
+    el('p', { class: 'hint', text: 'Klick auf einen Text verdeckt ihn, ein zweiter Klick deckt ihn wieder auf. Für Stellen ohne Rahmen ziehst du eine Fläche auf, auch für sehr kleine Texte. Jede Fläche wird eine eigene Karte. Neue Folie gewählt: die Flächen beginnen von vorn.' }),
     stage,
     el('div', { class: 'actions' },
-      el('button', { type: 'button', class: 'btn small', onclick: () => { if (!shown) return; boxes.filter(b => !rects.some(r => covers(r, b))).forEach(b => rects.push(Object.assign(rectOf(b, b.text), { id: rectId(rects) }))); draw(); } }, 'Alle Texte verdecken'),
+      el('button', { type: 'button', class: 'btn small', onclick: () => { if (!shown) return; boxes.filter(b => b.h >= IO_MIN_H && !rects.some(r => covers(r, b))).forEach(b => rects.push(Object.assign(rectOf(b, b.text), { id: rectId(rects) }))); draw(); } }, 'Alle Texte verdecken'),
       el('button', { type: 'button', class: 'btn small ghost', onclick: () => { rects = []; draw(); } }, 'Alle aufdecken'),
       count),
     list,
@@ -4121,6 +4136,8 @@ function bind() {
   $('#card-search').addEventListener('input', e => { view.search = e.target.value.trim(); renderCardList(); });
   $('#add-card').addEventListener('click', addCard);
   $('#add-occlusion').addEventListener('click', addOcclusion);
+  $('#add-card-empty').addEventListener('click', addCard);
+  $('#add-occlusion-empty').addEventListener('click', addOcclusion);
   $('#drop-dupes').addEventListener('click', () => { state.cards = state.cards.filter(c => !c.dupe); saveCards(); renderDeck(); });
   $('#drop-known').addEventListener('click', e => armConfirm(e.currentTarget, 'Wirklich entfernen?', () => { state.cards = state.cards.filter(c => !c.known); saveCards(); renderDeck(); }));
   const ldrop = $('#lib-drop');
@@ -4138,7 +4155,7 @@ function bind() {
     const onlyNew = !$('#only-new-row').hidden && $('#opt-onlynew').checked;
     const cards = state.cards.filter(c => !c.draft && !(onlyNew && noteGuids(c).every(g => exported.has(g))));
     const msg = $('#export-msg');
-    if (!cards.length) { msg.className = 'msg'; msg.textContent = 'Alle Karten wurden schon exportiert.'; return; }
+    if (!cards.length) { msg.className = 'msg'; msg.textContent = state.cards.some(c => !c.draft) ? 'Alle Karten wurden schon exportiert.' : 'Noch keine fertige Karte: Speichere die Karte zuerst.'; return; }
     // Image occlusion needs the slide; without the PDF those cards wait for a later export.
     const lost = cards.filter(c => c.type === 'occlusion' && !pdfDocs.has(c.fileId));
     const go = cards.filter(c => !lost.includes(c));

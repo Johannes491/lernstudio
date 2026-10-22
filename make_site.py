@@ -365,7 +365,7 @@ body = replace(body, "  if (!caps.sample) { $('#gen-cards-msg').textContent = er
 
 # cost after each run
 body = replace(body, "  const started = Date.now();\n", "  const started = Date.now(), cost0 = usage.cost;\n")
-body = replace(body, "Karten in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}.`;", "Karten in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}${costNote(cost0)}.`;")
+body = replace(body, "${karten(state.cards.length)} in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}.`;", "${karten(state.cards.length)} in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}${costNote(cost0)}.`;")
 body = replace(body, "let quizCtl = null, quizJobs = [], pendingQuestions = [];", "let quizCtl = null, quizJobs = [], pendingQuestions = [], quizCost0 = 0;")
 body = replace(body, "  quizCtl = new AbortController();\n  setQuizBusy(true); paintQuizProgress();", "  quizCtl = new AbortController(); quizCost0 = usage.cost;\n  setQuizBusy(true); paintQuizProgress();")
 body = replace(body, "fehlgeschlagen.` : n ? 'Fertig.' : '';", "fehlgeschlagen.` : n ? `Fertig${costNote(quizCost0)}.` : '';")
