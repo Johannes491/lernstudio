@@ -18,6 +18,7 @@ Aus Vorlesungsfolien werden Anki-Karteikarten und Übungsquizze.
 - **Direkt nach Anki** (nur Website): mit dem Add-on AnkiConnect landen die Karten ohne Datei direkt in Anki.
 - **Folienauswahl:** „Nur diese Folien“ (z. B. 1–16) oder eine Angabe in den Anforderungen wie „nur die ersten 16 Folien“ gilt verbindlich für Karten, Lückensuche und Quiz.
 - **Schwierige PDFs:** Folien, deren Text beim Auslesen Formeln verliert oder als Zeichensalat ankommt, gehen automatisch als Bild an Claude.
+- **Neues Deck beginnen:** Ein Button unter den Reitern leert Material, Karten und Quiz für die nächste Vorlesung. Kurs, Anforderungen, eigene Decks, Exportverlauf, Altklausuren, Lernverlauf und Lernplan bleiben.
 - **Fortsetzen:** Claude arbeitet nur, solange die Seite offen ist. Wird sie mitten in einem Lauf geschlossen, bleibt alles Fertige gespeichert, und „Fortsetzen“ erstellt beim nächsten Öffnen nur den Rest.
 
 Mehr: [Bisherige Schritte](SCHRITTE.md) · [Roadmap](ROADMAP.md)

@@ -71,6 +71,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 
 /* Header */
 .top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px 24px;margin-bottom:20px}
+.top-actions{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 .brand{display:flex;gap:14px;align-items:center;min-width:0}
 .brand-mark{width:44px;height:32px;flex:none;border-radius:4px;background:var(--surface);border:1px solid var(--line);
   background-image:linear-gradient(to bottom,transparent 9px,var(--card-rule) 9px,var(--card-rule) 11px,transparent 11px),repeating-linear-gradient(to bottom,transparent 0 16px,var(--card-line) 16px 17px);
@@ -285,11 +286,14 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
         <p class="sub">Aus Vorlesungsfolien werden Anki-Karteikarten und Übungsquizze.</p>
       </div>
     </div>
-    <nav class="tabs" role="tablist" aria-label="Werkzeug">
-      <button type="button" role="tab" id="tab-karten" aria-selected="true" aria-controls="view-karten">Karteikarten</button>
-      <button type="button" role="tab" id="tab-quiz" aria-selected="false" aria-controls="view-quiz">Quiz</button>
-      <button type="button" role="tab" id="tab-plan" aria-selected="false" aria-controls="view-plan">Lernplan</button>
-    </nav>
+    <div class="top-actions">
+      <nav class="tabs" role="tablist" aria-label="Werkzeug">
+        <button type="button" role="tab" id="tab-karten" aria-selected="true" aria-controls="view-karten">Karteikarten</button>
+        <button type="button" role="tab" id="tab-quiz" aria-selected="false" aria-controls="view-quiz">Quiz</button>
+        <button type="button" role="tab" id="tab-plan" aria-selected="false" aria-controls="view-plan">Lernplan</button>
+      </nav>
+      <button type="button" id="start-fresh" class="btn small" title="Leert Material, Karten, Quiz und Vorlesungsname. Kurs, Anforderungen, Einstellungen, eigene Decks, Exportverlauf, Altklausuren, Lernverlauf und Lernplan bleiben.">Neues Deck beginnen</button>
+    </div>
   </header>
 
   <section id="key-panel" class="panel keybox" aria-labelledby="key-h">
@@ -1871,9 +1875,10 @@ async function runCardJob(job, total, o) {
       tier: o.tier, effort: EFFORT.cards, signal: cardCtl.signal, images,
       onItem: r => {
         if (r.skip) { job.skip = String(r.reason || 'laut deinen Anforderungen').slice(0, 120); return; }
+        if (!cardJobs.includes(job)) return;
         if (r.type === 'occlusion') {
           if (o.occlusion && o.images && images) pending.push(occlusionFromClaude(r, job.chunk).then(c => {
-            if (!c || job.run !== run) return;
+            if (!c || job.run !== run || !cardJobs.includes(job)) return;
             c.job = job.key; state.cards.push(c);
             job.n++; job.live = karten(job.n);
             scheduleDeckRender();
@@ -1968,6 +1973,7 @@ const covReady = job => job.kind !== 'cov' || (job.deps || []).every(k => { cons
 async function continueCards() {
   const o = cardRun.opts, msg = $('#gen-cards-msg');
   const started = Date.now(), cost0 = usage.cost;
+  const fresh = freshCount;
   if (o.filter) msg.textContent = `Auswahl: ${describeFilter(o.filter)}${o.filter.src === 'req' ? ' (aus deinen Anforderungen)' : ''}.`;
   cardCtl = new AbortController();
   // Speed: the coverage checks wait in the same queue as the card sections and start as soon as theirs are done,
@@ -1988,6 +1994,7 @@ async function continueCards() {
   paintCardProgress();
   const failed = cardJobs.filter(j => j.status === 'fehler').length;
   setCardBusy(false);
+  if (fresh !== freshCount) return;
   const secs = Math.round((Date.now() - started) / 1000);
   msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${karten(state.cards.length)} in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}${costNote(cost0)}.`;
 }
@@ -2021,6 +2028,7 @@ async function runCoverageJob(job, opts) {
     await streamItems(coveragePrompt(g, inGroup, o), {
       tier: o.tier, effort: EFFORT.coverage, signal: cardCtl.signal,
       onItem: r => {
+        if (!cardJobs.includes(job)) return;
         if (Array.isArray(r.duplicates)) {
           r.duplicates.map(String).forEach(id => { if (ids.has(id)) { const c = state.cards.find(x => x.id === id); if (c && !c.dupe && c.type !== 'occlusion') { c.dupe = true; dupes++; } } });
         } else {
@@ -2968,6 +2976,7 @@ async function runQuizJob(job, o) {
     await streamItems(job.tasks ? examPrompt(job.tasks, o) : quizPrompt(job.chunk, plan, tfTrue, o), {
       tier: o.tier, effort: job.tasks ? EFFORT.exam : EFFORT.quiz, signal: quizCtl.signal,
       onItem: r => {
+        if (!quizJobs.includes(job)) return;
         const q = normalizeQuestions([r], job.chunk || EXAM_CHUNK, o)[0];
         if (!q) return;
         q.job = job.key; pendingQuestions.push(q);
@@ -4219,12 +4228,35 @@ async function savePlanCalendar(btn) {
   finally { btn.disabled = false; }
 }
 
+/* ---------- Neues Deck ---------- */
+// Empties everything that belongs to one lecture: material, cards, quiz and runs in progress. Course, requirements,
+// settings, own decks, export history, old exams, learning history and study plans stay.
+let freshCount = 0;
+function startFresh() {
+  freshCount++;
+  if (cardCtl) cardCtl.abort();
+  if (quizCtl) quizCtl.abort();
+  state.files = []; state.units = []; pdfDocs.clear(); resetMaterialCaches(); saveMaterial();
+  state.cards = []; cardJobs = []; cardRun = null; saveCards(); saveCardRun();
+  state.quiz = null; quizJobs = []; pendingQuestions = []; quizRun = null; saveQuiz(); saveQuizRun();
+  Object.assign(view, { slide: null, search: '', editing: null }); $('#card-search').value = '';
+  $('#lecture').value = ''; saveMeta();
+  $('#slide-range').value = ''; store.set('slideRange', '');
+  delete $('#deck-name').dataset.touched; store.del('deckName'); syncDeckName();
+  $('#export-msg').textContent = '';
+  $('#start-quiz').hidden = true;
+  setCardBusy(false); setQuizBusy(false);
+  renderFiles(); updateImageOptions(); renderSlideRangeHint(); paintCardProgress(); paintQuizProgress(); renderDeck(); renderQuizResume(); showQuizView();
+  ['#gen-cards-msg', '#gen-quiz-msg'].forEach(id => { $(id).textContent = 'Alles geleert. Lade links das Material für das neue Deck.'; });
+}
+
 /* ---------- Tabs ---------- */
 const TABS = ['karten', 'quiz', 'plan'];
 function showTab(name) {
   if (!TABS.includes(name)) name = 'karten';
   for (const t of TABS) { $('#tab-' + t).setAttribute('aria-selected', String(t === name)); $('#view-' + t).hidden = t !== name; }
   if (name === 'plan') renderPlanForm();
+  $('#start-fresh').hidden = name === 'plan';
   store.set('tab', name);
   try { history.replaceState(null, '', '#' + name); } catch {}
 }
@@ -4300,6 +4332,7 @@ function bind() {
   $('#run-coverage').addEventListener('click', () => runCoverage());
   $('#card-search').addEventListener('input', e => { view.search = e.target.value.trim(); renderCardList(); });
   $('#add-card').addEventListener('click', addCard);
+  $('#start-fresh').addEventListener('click', e => armConfirm(e.currentTarget, 'Wirklich alles leeren?', startFresh));
   $('#add-occlusion').addEventListener('click', addOcclusion);
   $('#add-card-empty').addEventListener('click', addCard);
   $('#add-occlusion-empty').addEventListener('click', addOcclusion);
