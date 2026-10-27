@@ -395,6 +395,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
                 <label><span class="lbl">Deckname in Anki</span><input type="text" id="deck-name" autocomplete="off"></label>
                 <label class="choice" style="align-self:end"><input type="checkbox" id="opt-slideimg"><span>Folienbild auf der Rückseite<small id="opt-slideimg-hint">Wie in deinem Deck zur Persönlichkeitspsychologie. Nur für PDFs, die in dieser Sitzung geladen wurden.</small></span></label>
               </div>
+              <p id="export-types" class="hint"></p>
               <label class="choice" id="only-new-row" hidden><input type="checkbox" id="opt-onlynew"><span id="only-new-label">Nur neue Karten exportieren</span></label>
               <div class="actions">
                 <button type="button" id="export-apkg" class="btn primary">Anki-Datei speichern</button>
@@ -1442,14 +1443,24 @@ async function readAnkiDeck(file) {
     const tables = new Set(rows("SELECT name FROM sqlite_master WHERE type = 'table'").map(r => r[0]));
     const types = new Map(), decks = new Map();
     if (tables.has('notetypes')) {
-      rows('SELECT id, name FROM notetypes').forEach(([id, name]) => types.set(String(id), { name: String(name), fields: [] }));
+      // Settings of note types and templates are stored as protobuf (Anki's notetypes.proto).
+      rows('SELECT id, name, config FROM notetypes').forEach(([id, name, config]) => {
+        const c = protoFields(config);
+        types.set(String(id), { id: String(id), name: String(name), fields: [], tmpls: [], cloze: c[1] === 1, kind: c[1] === 1 ? 1 : 0, sortf: c[2] || 0, css: protoText(c[3]), latexPre: protoText(c[5]), latexPost: protoText(c[6]), stock: c[9] || 0 });
+      });
       rows('SELECT ntid, ord, name FROM fields').forEach(([ntid, ord, name]) => { const t = types.get(String(ntid)); if (t) t.fields[ord] = String(name); });
+      rows('SELECT ntid, ord, name, config FROM templates').forEach(([ntid, ord, name, config]) => {
+        const t = types.get(String(ntid)), c = protoFields(config);
+        if (t) t.tmpls[ord] = { name: String(name), qfmt: protoText(c[1]), afmt: protoText(c[2]) };
+      });
       rows('SELECT id, name FROM decks').forEach(([id, name]) => decks.set(String(id), String(name).split('\x1f').join('::')));
     } else {
       const [models, dks] = rows('SELECT models, decks FROM col')[0] || [];
-      Object.entries(JSON.parse(models || '{}')).forEach(([id, m]) => types.set(String(id), { name: String(m.name), fields: (m.flds || []).map(f => f.name), cloze: m.type === 1 }));
+      Object.entries(JSON.parse(models || '{}')).forEach(([id, m]) => types.set(String(id), { id: String(id), name: String(m.name), fields: (m.flds || []).map(f => f.name), cloze: m.type === 1, kind: m.type === 1 ? 1 : 0,
+        tmpls: (m.tmpls || []).map(t => ({ name: String(t.name), qfmt: String(t.qfmt || ''), afmt: String(t.afmt || '') })), sortf: m.sortf || 0, css: m.css || '', latexPre: m.latexPre || '', latexPost: m.latexPost || '', stock: m.originalStockKind || 0 }));
       Object.entries(JSON.parse(dks || '{}')).forEach(([id, d]) => decks.set(String(id), String(d.name)));
     }
+    const own = chooseAnkiTypes(Array.from(types.values()));
     const deckOf = new Map(rows('SELECT nid, MIN(did) FROM cards GROUP BY nid').map(([nid, did]) => [String(nid), decks.get(String(did)) || '']));
     const kindOf = t => !t ? 'basic' : /occlusion|bildverdeckung/i.test(t.name) ? 'skip' : t.cloze || /cloze|lückentext/i.test(t.name) || t.fields[0] === 'Text' ? 'cloze' : /umgekehrt|reverse/i.test(t.name) ? 'reverse' : 'basic';
     const fronts = [], pool = [], st = { f: [], b: [], list: 0, bold: 0, count: 0, enumq: 0, cloze: 0, reverse: 0 };
@@ -1474,13 +1485,56 @@ async function readAnkiDeck(file) {
       if (!/<img|\[sound:/i.test(front + back) && ft.length >= 8 && ft.length <= 160 && (kind === 'cloze' || (bt.length >= 20 && bt.length <= 700)))
         pool.push({ type: kind, front: cleanAnkiHtml(front), back: kind === 'cloze' ? cleanAnkiHtml(back).slice(0, 300) : cleanAnkiHtml(back) });
     }
-    if (!fronts.length) throw new Error('In dieser Datei wurden keine Karten mit Text gefunden.');
+    if (!fronts.length && !own.basic) throw new Error('In dieser Datei wurden keine Karten mit Text gefunden.');
     const deck = Array.from(topDecks.entries()).sort((a, b) => b[1] - a[1])[0];
     const examples = pool.map(x => [hash53(x.front), x]).sort((a, b) => a[0] - b[0]).slice(0, 24).map(([, x]) => x);
     const notes = fronts.length;
-    return { deck: deck ? deck[0] : file.name.replace(/\.(apkg|colpkg)$/i, ''), notes, fronts, examples,
-      stats: { front: medianOf(st.f), back: medianOf(st.b), list: st.b.length ? st.list / st.b.length : 0, bold: st.bold / notes, count: st.enumq ? st.count / st.enumq : 0, cloze: st.cloze / notes, reverse: st.reverse / notes } };
+    return { deck: deck ? deck[0] : file.name.replace(/\.(apkg|colpkg)$/i, ''), notes, fronts, examples, types: own.basic ? own : null,
+      stats: { front: medianOf(st.f), back: medianOf(st.b), list: notes && st.b.length ? st.list / st.b.length : 0, bold: notes ? st.bold / notes : 0, count: st.enumq ? st.count / st.enumq : 0, cloze: notes ? st.cloze / notes : 0, reverse: notes ? st.reverse / notes : 0 } };
   } finally { db.close(); }
+}
+// The few protobuf fields the Lernstudio needs: numbers and texts by field number.
+function protoFields(buf) {
+  const out = {};
+  if (!(buf instanceof Uint8Array)) return out;
+  let i = 0;
+  const varint = () => { let x = 0, f = 1, b; do { b = buf[i++]; x += (b & 0x7f) * f; f *= 128; } while (b & 0x80 && i < buf.length); return x; };
+  while (i < buf.length) {
+    const key = varint(), no = Math.floor(key / 8), wt = key % 8;
+    if (wt === 0) out[no] = varint();
+    else if (wt === 2) { const len = varint(); out[no] = buf.subarray(i, i + len); i += len; }
+    else if (wt === 1) i += 8;
+    else if (wt === 5) i += 4;
+    else break;
+  }
+  return out;
+}
+const protoText = b => (b instanceof Uint8Array ? new TextDecoder().decode(b) : '');
+// The user's own note types, recognized by their make-up (names and stock markers differ between collections and
+// languages): one card from two fields; two cards from two fields; cloze; cloze with the image occlusion script.
+// Types the Lernstudio made itself are never chosen.
+function chooseAnkiTypes(list) {
+  const own = list.filter(t => t && !/^Lernstudio\b/i.test(t.name) && t.fields.length && t.tmpls.length && t.tmpls.every(Boolean));
+  const isIO = t => t.kind === 1 && (t.stock === 6 || t.tmpls.some(x => /imageOcclusion|image-occlusion/i.test(x.qfmt + x.afmt)));
+  const best = (cands, names) => cands.sort((a, b) => (names.test(b.name) - names.test(a.name)) || (a.name.length - b.name.length))[0] || null;
+  return {
+    basic: best(own.filter(t => t.kind === 0 && t.tmpls.length === 1 && t.fields.length === 2 && !/\{\{type:/i.test(t.tmpls[0].qfmt)), /^(Einfach|Basic)$/i),
+    reverse: best(own.filter(t => t.kind === 0 && t.tmpls.length === 2 && t.fields.length === 2), /umgekehrt|reversed/i),
+    cloze: best(own.filter(t => t.kind === 1 && !isIO(t)), /^(Lückentext|Cloze)$/i),
+    io: best(own.filter(isIO), /^(Bildverdeckung|Image Occlusion)$/i),
+  };
+}
+// The note types of the newest library file that has them.
+function ownAnkiTypes() {
+  const d = state.library.filter(x => x.status === 'ok' && x.types && x.types.basic).sort((a, b) => String(b.added || '').localeCompare(String(a.added || '')))[0];
+  return d ? Object.assign({ from: d.file || d.deck }, d.types) : null;
+}
+function renderExportTypes() {
+  const t = ownAnkiTypes(), box = $('#export-types');
+  if (!box) return;
+  box.textContent = t
+    ? `Notiztypen: deine eigenen aus „${t.from}“ (${[t.basic, t.reverse, t.cloze, t.io].filter(Boolean).map(x => x.name).join(', ')}). Es entsteht kein neuer Notiztyp.`
+    : 'Notiztypen: die des Lernstudios. Damit die Karten in deinen Anki-Typen landen (Einfach, Lückentext, Bildverdeckung …), exportiere in Anki einmal deine Sammlung (Datei → Exportieren → Anki-Sammlungspaket .colpkg, ohne Medien) und lade sie unter „Meine Anki-Decks“.';
 }
 function cleanAnkiHtml(html) {
   return sanitize(String(html).replace(/&nbsp;|\u00a0/g, ' ').replace(/<\/div>\s*<div>/gi, '<br>').replace(/<\/?div[^>]*>/gi, ''))
@@ -1510,9 +1564,10 @@ function renderLibrary() {
   $('#lib-count').textContent = ok.length ? `(${ok.length} ${ok.length === 1 ? 'Deck' : 'Decks'}, ${ok.reduce((a, d) => a + d.notes, 0).toLocaleString('de-DE')} Karten)` : '';
   fill($('#lib-list'), ...state.library.map(d => el('li', { class: 'file' },
     el('span', { class: 'file-name', text: d.deck || d.file }),
-    el('span', { class: 'file-meta' + (d.status === 'error' ? ' err' : ''), text: d.status === 'lädt' ? 'wird gelesen …' : d.status === 'error' ? d.error : `${karten(d.notes)} · Vorderseite ~${d.stats.front} Zeichen, Rückseite ~${d.stats.back} Zeichen · ${Math.round(d.stats.list * 100)} % Listen` }),
+    el('span', { class: 'file-meta' + (d.status === 'error' ? ' err' : ''), text: d.status === 'lädt' ? 'wird gelesen …' : d.status === 'error' ? d.error : `${karten(d.notes)} · Vorderseite ~${d.stats.front} Zeichen, Rückseite ~${d.stats.back} Zeichen · ${Math.round(d.stats.list * 100)} % Listen` + (d.types ? ' · Notiztypen erkannt' : '') }),
     d.status === 'lädt' ? null : el('button', { type: 'button', class: 'btn small ghost', 'aria-label': (d.deck || d.file) + ' entfernen', onclick: () => { state.library = state.library.filter(x => x !== d); knownChanged(); saveLibrary(); renderLibrary(); renderDeck(true); } }, 'Entfernen'))));
   $('#opt-libstyle').disabled = !ok.length;
+  renderExportTypes();
 }
 // Decks of the same course first (by words of the course name), else all decks.
 function styleDecks() {
@@ -2242,17 +2297,45 @@ async function occlusionFromClaude(r, chunk) {
 const noteGuids = c => c.type === 'occlusion' ? c.occ.rects.map(r => c.guid + r.id) : [c.guid];
 const noteCount = cards => cards.reduce((n, c) => n + noteGuids(c).length, 0);
 const mediaBase = deckName => `lernstudio-${tagSlug(deckName.replace(/::/g, '-')).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'deck'}-${hash53(deckName).toString(36).slice(0, 6)}`;
-function ankiNotesOf(c, images) {
+// Anki's own image occlusion: one line per covered area; "oi=1" covers the other areas too ("alle verdecken").
+function occlusionSpec(c) {
+  const n = v => String(Math.round(v * 10000) / 10000).replace(/^0(?=\.)/, '');
+  return c.occ.rects.map((r, i) => `{{c${i + 1}::image-occlusion:rect:left=${n(r.x)}:top=${n(r.y)}:width=${n(r.w)}:height=${n(r.h)}${c.occ.mode === 'one' ? '' : ':oi=1'}}}<br>`).join('');
+}
+// One Anki note per card. With the user's own note types (own), the fields go into them by position: source and slide
+// picture are added to the back, since those types have no fields of their own for them.
+function ankiNotesOf(c, images, own) {
   const quelle = c.fileName ? escapeHtml(c.fileName.replace(/\.[^.]+$/, '')) : '';
   const folie = c.slide ? String(c.slide) : '';
   const tags = [tagSlug(c.topic), c.kind === 'formula' ? 'Formel' : c.kind === 'calc' ? 'Rechenaufgabe' : '', c.type === 'occlusion' ? 'Bildverdeckung' : ''].filter(Boolean);
+  if (own) {
+    const src = quelle ? `<br><br><span style="font-size:12px;color:#888">${quelle}${folie ? ' · Folie ' + folie : ''}</span>` : '';
+    const key = c.fileId + ':' + c.slide, pic = images.has(key) ? `<br><img src="${images.get(key)}">` : '';
+    const note = (t, values, ords) => ({ guid: c.guid || newGuid(), mid: Number(t.id), tags, values: t.fields.map((_, i) => values[i] || ''), ords });
+    if (c.type === 'occlusion' && own.io && images.has(key)) return [note(own.io, [occlusionSpec(c), `<img src="${images.get(key)}">`, c.front, (c.back || '') + src], c.occ.rects.map((_, i) => i))];
+    if (c.type === 'cloze' && own.cloze) return [note(own.cloze, [c.front, (c.back || '') + src + pic], clozeOrds(c.front))];
+    // Both directions are asked, so nothing that would give away the answer goes on either side.
+    if (c.type === 'reverse' && own.reverse) return [note(own.reverse, [c.front, c.back], [0, 1])];
+    if (c.type !== 'occlusion') {
+      const { front, back } = c.type === 'cloze' ? clozeToBasic(c.front, c.back) : c;
+      return [note(own.basic, [front, (back || '') + src + pic], [0])];
+    }
+  }
   if (c.type === 'occlusion') return c.occ.rects.map(r => {
     const g = c.guid + r.id;
-    return { guid: g, mid: MODEL_IDS.occlusion, tags,
+    return { guid: g, mid: MODEL_IDS.occlusion, tags, ords: [0],
       values: [`<img src="${images.get('io:' + g + ':q')}">`, `<img src="${images.get('io:' + g + ':a')}">`, escapeHtml(r.label || ''), c.front, c.back || '', quelle, folie] };
   });
   const bild = images.has(c.fileId + ':' + c.slide) ? `<img src="${images.get(c.fileId + ':' + c.slide)}">` : '';
-  return [{ guid: c.guid || newGuid(), mid: MODEL_IDS[c.type] || MODEL_IDS.basic, tags, values: [c.front, c.back || '', quelle, folie, bild] }];
+  return [{ guid: c.guid || newGuid(), mid: MODEL_IDS[c.type] || MODEL_IDS.basic, tags, values: [c.front, c.back || '', quelle, folie, bild], ords: c.type === 'cloze' ? clozeOrds(c.front) : c.type === 'reverse' ? [0, 1] : [0] }];
+}
+// A note type of the user's in the form an .apkg carries it. Same id and the same field and template names, so Anki
+// files the notes under the existing type; the old change time keeps Anki from touching the user's templates.
+function ownModel(t, deckId) {
+  return { id: String(t.id), name: t.name, type: t.kind, mod: 1, usn: -1, sortf: t.sortf || 0, did: deckId,
+    tmpls: t.tmpls.map((x, i) => ({ name: x.name, ord: i, qfmt: x.qfmt, afmt: x.afmt, did: null, bqfmt: '', bafmt: '', bfont: '', bsize: 0 })),
+    flds: t.fields.map((name, i) => ({ name, ord: i, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] })),
+    css: t.css || '', latexPre: t.latexPre || LATEX_PRE, latexPost: t.latexPost || '\\end{document}', latexsvg: false, req: [[0, 'any', [0]]], tags: [], vers: [], originalStockKind: t.stock || 0 };
 }
 // The slide with the masks drawn in. Front: the asked area red with a question mark (with "all", the others yellow).
 // Back: the asked area open and framed.
@@ -2512,7 +2595,7 @@ async function csumOf(text) {
     return ((b[0] << 24) >>> 0) + (b[1] << 16) + (b[2] << 8) + b[3];
   } catch { return 0; }
 }
-async function buildApkg({ deckName, cards, tags, images }) {
+async function buildApkg({ deckName, cards, tags, images, own }) {
   await loadScript(CDN.sql);
   if (typeof window.initSqlJs !== 'function') throw new Error('Die Datenbank-Bibliothek konnte nicht geladen werden.');
   const SQL = await window.initSqlJs();
@@ -2534,31 +2617,38 @@ async function buildApkg({ deckName, cards, tags, images }) {
       lapse: { delays: [10], leechAction: 0, leechFails: 8, minInt: 1, mult: 0 },
       new: { bury: true, delays: [1, 10], initialFactor: 2500, ints: [1, 4, 7], order: 1, perDay: 20, separate: true },
       rev: { bury: true, ease4: 1.3, fuzz: 0.05, ivlFct: 1, maxIvl: 36500, minSpace: 1, perDay: 100 } } };
-    db.run('INSERT INTO col VALUES (1,?,?,?,11,0,0,0,?,?,?,?,?)', [nowS - (nowS % 86400), nowMs, nowMs, JSON.stringify(conf), JSON.stringify(ankiModels(did, nowS)), JSON.stringify(decks), JSON.stringify(dconf), '{}']);
+    // Only the note types the notes use go into the file (the user's own ones, else those of the Lernstudio).
+    const lern = ankiModels(did, nowS), models = {};
+    const notes = cards.flatMap(c => ankiNotesOf(c, images, own).map(n => Object.assign(n, { card: c })));
+    for (const n of notes) {
+      if (models[n.mid]) continue;
+      const t = own && [own.basic, own.reverse, own.cloze, own.io].find(x => x && Number(x.id) === n.mid);
+      models[n.mid] = t ? ownModel(t, did) : lern[n.mid];
+    }
+    db.run('INSERT INTO col VALUES (1,?,?,?,11,0,0,0,?,?,?,?,?)', [nowS - (nowS % 86400), nowMs, nowMs, JSON.stringify(conf), JSON.stringify(models), JSON.stringify(decks), JSON.stringify(dconf), '{}']);
     const insN = db.prepare('INSERT INTO notes VALUES (?,?,?,?,?,?,?,?,?,?,?)');
     const insC = db.prepare('INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
     let nid = nowMs, cid = nowMs, due = 0;
-    const models = ankiModels(did, nowS);
-    for (const c of cards) {
-      for (const n of ankiNotesOf(c, images)) {
-        due++;
-        const flds = n.values.map(f => String(f).replace(/\x1f/g, ' '));
-        const noteTags = [...tags, ...n.tags];
-        // Anki compares first fields with image file names kept (an occlusion note's first field is its image).
-        const first = stripHtml(flds[0].replace(/<img[^>]*src="([^"]+)"[^>]*>/gi, ' $1 '));
-        insN.run([++nid, n.guid, n.mid, nowS, -1, noteTags.length ? ' ' + Array.from(new Set(noteTags)).join(' ') + ' ' : '', flds.join('\x1f'), stripHtml(flds[models[n.mid].sortf]), await csumOf(first), 0, '']);
-        const ords = c.type === 'cloze' ? clozeOrds(c.front) : c.type === 'reverse' ? [0, 1] : [0];
-        for (const ord of ords) insC.run([++cid, nid, did, ord, nowS, -1, 0, 0, due, 0, 0, 0, 0, 0, 0, 0, 0, '']);
-      }
+    for (const n of notes) {
+      due++;
+      const flds = n.values.map(f => String(f).replace(/\x1f/g, ' '));
+      const noteTags = [...tags, ...n.tags];
+      // Anki compares first fields with image file names kept (an occlusion note's first field is its image).
+      const first = stripHtml(flds[0].replace(/<img[^>]*src="([^"]+)"[^>]*>/gi, ' $1 '));
+      insN.run([++nid, n.guid, n.mid, nowS, -1, noteTags.length ? ' ' + Array.from(new Set(noteTags)).join(' ') + ' ' : '', flds.join('\x1f'), stripHtml(flds[models[n.mid].sortf]), await csumOf(first), 0, '']);
+      for (const ord of n.ords) insC.run([++cid, nid, did, ord, nowS, -1, 0, 0, due, 0, 0, 0, 0, 0, 0, 0, 0, '']);
     }
     insN.free(); insC.free();
     return db.export();
   } finally { db.close(); }
 }
 async function packageApkg({ deckName, cards, tags, withImages, onStep }) {
-  const media = [], images = new Map();
-  if (withImages) {
-    const keys = Array.from(new Set(cards.filter(c => c.slide && pdfDocs.has(c.fileId)).map(c => c.fileId + ':' + c.slide)));
+  const media = [], images = new Map(), own = ownAnkiTypes();
+  // Anki's own image occlusion draws the masks itself and only needs the slide.
+  const ioOwn = own && own.io;
+  const want = cards.filter(c => c.slide && pdfDocs.has(c.fileId) && (withImages || (ioOwn && c.type === 'occlusion')));
+  if (want.length) {
+    const keys = Array.from(new Set(want.map(c => c.fileId + ':' + c.slide)));
     for (const [i, k] of keys.entries()) {
       if (onStep) onStep(`Folienbild ${i + 1} von ${keys.length} wird erstellt …`);
       const [fid, num] = k.split(':').map(Number);
@@ -2569,12 +2659,12 @@ async function packageApkg({ deckName, cards, tags, withImages, onStep }) {
       media.push({ name, data: new Uint8Array(await blob.arrayBuffer()) });
     }
   }
-  for (const m of await occlusionMedia(cards, deckName, onStep)) {
+  for (const m of ioOwn ? [] : await occlusionMedia(cards, deckName, onStep)) {
     images.set(m.key, m.name);
     media.push({ name: m.name, data: new Uint8Array(await m.blob.arrayBuffer()) });
   }
   if (onStep) onStep('Anki-Datei wird gebaut …');
-  const col = await buildApkg({ deckName, cards, tags, images });
+  const col = await buildApkg({ deckName, cards, tags, images, own });
   await loadScript(CDN.jszip);
   const zip = new window.JSZip();
   zip.file('collection.anki2', col);
@@ -2605,15 +2695,25 @@ async function sendToAnki(cards, deckName, withImages, msgEl) {
     const perm = await ankiCall('requestPermission');
     if (!perm || perm.permission !== 'granted') throw new Error('Anki hat den Zugriff abgelehnt. Erlaube diese Website im Dialog von AnkiConnect.');
     if (perm.requireApikey) throw new Error('AnkiConnect verlangt einen API-Schlüssel. Entferne ihn in den Einstellungen des Add-ons oder nutze „Anki-Datei speichern“.');
-    // The same note types as in the .apkg export, created once if missing.
-    const have = new Set(await ankiCall('modelNames'));
-    for (const m of Object.values(ankiModels(1, 0))) {
-      if (!have.has(m.name)) await ankiCall('createModel', { modelName: m.name, inOrderFields: m.flds.map(f => f.name), css: m.css, isCloze: m.type === 1, cardTemplates: m.tmpls.map(t => ({ Name: t.name, Front: t.qfmt, Back: t.afmt })) });
+    // The user's own note types in this Anki, recognized like in an export; Lernstudio types only where one is missing.
+    const names = await ankiCall('modelNames');
+    let own = null;
+    try {
+      const found = await ankiCall('findModelsByName', { modelNames: names });
+      own = chooseAnkiTypes((found || []).map(m => ({ id: String(m.id), name: String(m.name), kind: m.type === 1 ? 1 : 0, sortf: m.sortf || 0, css: m.css || '', stock: m.originalStockKind || 0,
+        fields: (m.flds || []).map(f => f.name), tmpls: (m.tmpls || []).map(t => ({ name: t.name, qfmt: t.qfmt || '', afmt: t.afmt || '' })) })));
+      if (!own.basic) own = null;
+    } catch { own = null; }
+    const models = ankiModels(1, 0), have = new Set(names);
+    const needed = new Set(cards.flatMap(c => ankiNotesOf(c, new Map([[c.fileId + ':' + c.slide, 'x']]), own).map(n => n.mid)));
+    for (const m of Object.values(models)) {
+      if (needed.has(Number(m.id)) && !have.has(m.name)) await ankiCall('createModel', { modelName: m.name, inOrderFields: m.flds.map(f => f.name), css: m.css, isCloze: m.type === 1, cardTemplates: m.tmpls.map(t => ({ Name: t.name, Front: t.qfmt, Back: t.afmt })) });
     }
     await ankiCall('createDeck', { deck: deckName });
     const images = new Map();
-    if (withImages) {
-      const keys = Array.from(new Set(cards.filter(c => c.slide && pdfDocs.has(c.fileId)).map(c => c.fileId + ':' + c.slide)));
+    const want = cards.filter(c => c.slide && pdfDocs.has(c.fileId) && (withImages || (own && own.io && c.type === 'occlusion')));
+    if (want.length) {
+      const keys = Array.from(new Set(want.map(c => c.fileId + ':' + c.slide)));
       for (const [i, k] of keys.entries()) {
         msgEl.textContent = `Folienbild ${i + 1} von ${keys.length} geht an Anki …`;
         const [fid, num] = k.split(':').map(Number);
@@ -2624,16 +2724,16 @@ async function sendToAnki(cards, deckName, withImages, msgEl) {
         images.set(k, filename);
       }
     }
-    const io = await occlusionMedia(cards, deckName, t => { msgEl.textContent = t; });
+    const io = own && own.io ? [] : await occlusionMedia(cards, deckName, t => { msgEl.textContent = t; });
     for (const [i, m] of io.entries()) {
       msgEl.textContent = `Bildverdeckung ${i + 1} von ${io.length} geht an Anki …`;
       await ankiCall('storeMediaFile', { filename: m.name, data: await blobToB64(m.blob) });
       images.set(m.key, m.name);
     }
     const baseTags = [tagSlug($('#course').value), tagSlug($('#lecture').value)].filter(Boolean);
-    const models = ankiModels(1, 0);
-    const notes = cards.flatMap(c => ankiNotesOf(c, images).map(n => {
-      const model = models[n.mid];
+    const byId = new Map([own && own.basic, own && own.reverse, own && own.cloze, own && own.io].filter(Boolean).map(t => [Number(t.id), { name: t.name, flds: t.fields.map(name => ({ name })) }]));
+    const notes = cards.flatMap(c => ankiNotesOf(c, images, own).map(n => {
+      const model = byId.get(n.mid) || models[n.mid];
       return { deckName, modelName: model.name, fields: Object.fromEntries(model.flds.map((f, i) => [f.name, n.values[i]])),
         tags: Array.from(new Set([...baseTags, ...n.tags])), options: { allowDuplicate: false, duplicateScope: 'deck' } };
     }));
