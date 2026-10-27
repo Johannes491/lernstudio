@@ -647,7 +647,7 @@ const POOL = 3;
 // Calls that really run at the same time; work is split into multiples of this, so no slot idles at the end.
 const RUNNING = 2;
 // Speed: card writing is extraction, so little thinking is needed; checks and distractors get a bit more.
-const EFFORT = { cards: 'low', coverage: 'medium', quiz: 'medium', grade: 'low', exam: 'high' };
+const EFFORT = { cards: 'low', coverage: 'medium', quiz: 'medium', grade: 'low', exam: 'high', select: 'medium' };
 function callOpts({ tier, effort, signal, images }) {
   const opts = { modelTier: tier, cache: false };
   if (effort) opts.effort = effort;
@@ -935,6 +935,7 @@ async function addFiles(list) {
   updateImageOptions();
   suggestNames();
   renderDeck(true);
+  renderSlideRangeHint();
 }
 function addPasted() {
   const t = $('#paste').value.trim();
@@ -1015,76 +1016,179 @@ function resetMaterialCaches() {
 // Slide limits, binding for cards, coverage check and quizzes. They come from the "Nur diese Folien" field or,
 // if that is empty, from the user's instructions ("die ersten 16 Folien", "Folien 3 bis 10", "Folien 1–3 auslassen").
 const RANGE_DASH = '(?:-|–|—|bis(?:\\s+einschließlich)?)';
+// The field: lists and ranges ("1–16, 20", "3 5 7", "Folie 1 bis Folie 16", "ab 5", "bis 20"); after "ohne", "nicht"
+// or "außer" everything that follows is left out ("1–16 ohne 4", "ohne 1–3, 5").
 function parseRangeField(text) {
+  let t = String(text).toLowerCase().replace(/\b(folien?|seiten?|slides?)\b/g, ' ');
+  t = t.replace(new RegExp('(\\d{1,3})\\s*' + RANGE_DASH + '\\s*(\\d{1,3})', 'g'), '$1-$2');
+  const toks = t.split(/[,;]|\bund\b|\s+/).map(x => x.trim()).filter(Boolean);
   const inc = [], exc = [];
-  for (let part of String(text).split(/[,;]/)) {
-    part = part.trim().toLowerCase();
-    if (!part) continue;
-    const not = /^(ohne|nicht|außer)\s+/.test(part);
-    part = part.replace(/^(ohne|nicht|außer)\s+/, '').replace(/^folien?\s+/, '');
-    let m, r = null;
-    if ((m = part.match(new RegExp('^(\\d{1,3})\\s*' + RANGE_DASH + '\\s*(\\d{1,3})$')))) r = [+m[1], +m[2]];
-    else if ((m = part.match(/^ab\s+(\d{1,3})$/))) r = [+m[1], Infinity];
-    else if ((m = part.match(/^bis\s+(\d{1,3})$/))) r = [1, +m[1]];
-    else if ((m = part.match(/^(\d{1,3})$/))) r = [+m[1], +m[1]];
+  let not = false;
+  for (let i = 0; i < toks.length; i++) {
+    const x = toks[i];
+    if (/^(ohne|nicht|außer|ausser)$/.test(x)) { not = true; continue; }
+    let m, r;
+    if ((m = x.match(/^(\d{1,3})-(\d{1,3})$/))) r = [+m[1], +m[2]];
+    else if (x === 'ab' && /^\d{1,3}$/.test(toks[i + 1] || '')) r = [+toks[++i], Infinity];
+    else if (x === 'bis' && /^\d{1,3}$/.test(toks[i + 1] || '')) r = [1, +toks[++i]];
+    else if (/^\d{1,3}$/.test(x)) r = [+x, +x];
     else return null;
     if (r[0] > r[1]) r.reverse();
     (not ? exc : inc).push(r);
   }
   return inc.length || exc.length ? { inc, exc } : null;
 }
+// The instructions: every slide reference ("die ersten 16 Folien", "Folien 3–5 und 8–10", "Folien 3, 7 und 9",
+// "Folie 4 bis Folie 12", "bis Folie 20", "ab Folie 5") counts with the word that belongs to it: "nur …" includes,
+// "… auslassen", "lass … weg", "ohne …" exclude. A word belongs to a reference when it stands in the same comma part;
+// otherwise words from comma parts without slide references of their own count. Plain ranges without such a word
+// include; a single slide counts only with a word ("Folie 2 auslassen", "nur Folie 7", not "die Formel auf Folie 7").
 function parseRangeReq(text) {
   const inc = [], exc = [];
-  const NOT = /auslassen|weglassen|überspring|ignorier|ausnehmen|ausgenommen|\bohne\b|\baußer\b|\bnicht\b|\bkeine?\b/gi;
+  const NOT = /auslassen|weglassen|\bweg\b|überspring|ignorier|ausnehmen|ausgenommen|\bohne\b|\baußer\b|\bnicht\b|\bkeine?\b/gi;
   const ONLY = /\b(nur|lediglich|ausschließlich|beschränk|begrenz)/gi;
-  // "Folie 2 auslassen, das war nur eine Wiederholung": the word nearest to the slide number decides, first within its comma part.
-  const intent = (clause, at, len) => {
-    const near = (re, from, to) => { let best = Infinity; for (const w of clause.slice(from, to).matchAll(re)) best = Math.min(best, Math.abs(from + w.index - at)); return best; };
-    const start = clause.lastIndexOf(',', at) + 1, endC = clause.indexOf(',', at + len), end = endC < 0 ? clause.length : endC;
-    for (const [a, b] of [[start, end], [0, clause.length]]) {
-      const n = near(NOT, a, b), o = near(ONLY, a, b);
-      if (n < Infinity || o < Infinity) return n < o ? 'exc' : 'inc';
-    }
-    return '';
-  };
-  for (const clause of String(text).split(/[.;!\n]+/)) {
+  const ITEM = '\\d{1,3}(?:\\s*' + RANGE_DASH + '\\s*(?:(?:der\\s+|zur\\s+)?(?:Folie|Seite|Slide)\\s+)?\\d{1,3})?';
+  const LIST = new RegExp('\\b(Folien?|Seiten?|Slides?)\\s+(' + ITEM + '(?:\\s*(?:,|\\bund\\b|\\bsowie\\b|&|\\+)\\s*' + ITEM + ')*)', 'gi');
+  for (const clause of String(text).split(/[.;!?\n]+/)) {
+    const parts = [];
+    let p0 = 0;
+    for (const piece of clause.split(',')) { parts.push([p0, p0 + piece.length]); p0 += piece.length + 1; }
+    const partOf = i => parts.findIndex(([x, y]) => i >= x && i <= y);
+    const refs = [];
     let m;
-    if ((m = clause.match(/\bersten\s+(\d{1,3})\s+(?:Folien|Seiten|Slides)/i))) inc.push([1, +m[1]]);
-    const re = new RegExp('\\b(?:Folien?|Seiten?|Slides?)\\s+(\\d{1,3})\\s*' + RANGE_DASH + '\\s*(\\d{1,3})', 'gi');
-    for (const mm of clause.matchAll(re)) {
-      // "Folien 1–3 auslassen" excludes; "nur Folien 3 bis 10" and a plain range include.
-      (intent(clause, mm.index, mm[0].length) === 'exc' ? exc : inc).push([+mm[1], +mm[2]].sort((a, b) => a - b));
-    }
-    // A single slide counts only with a clear word: "Folie 2 auslassen" or "nur Folie 7", not "die Formel auf Folie 7".
-    for (const mm of clause.matchAll(/\b(?:Folie|Seite|Slide)\s+(\d{1,3})\b(?!\s*(?:-|–|—|bis\b))/gi)) {
+    if ((m = /\bersten\s+(\d{1,3})\s+(?:Folien|Seiten|Slides)/i.exec(clause))) refs.push({ at: m.index, end: m.index + m[0].length, items: [[1, +m[1]]], range: true });
+    for (const mm of clause.matchAll(LIST)) {
       if (/\b(?:bis|ab)\s+(?:einschließlich\s+)?(?:zur\s+|der\s+)?$/i.test(clause.slice(0, mm.index))) continue;
-      const it = intent(clause, mm.index, mm[0].length);
-      if (it) (it === 'exc' ? exc : inc).push([+mm[1], +mm[1]]);
+      const items = Array.from(mm[2].matchAll(new RegExp(ITEM, 'gi')), it => { const n = it[0].match(/\d{1,3}/g).map(Number); return n.length > 1 ? [Math.min(n[0], n[1]), Math.max(n[0], n[1])] : [n[0], n[0]]; });
+      refs.push({ at: mm.index, end: mm.index + mm[0].length, items, range: items.some(([x, y]) => x !== y) || (/[ns]$/i.test(mm[1]) && items.length > 1) });
     }
-    if ((m = clause.match(/\bbis\s+(?:einschließlich\s+)?(?:zur\s+)?(?:Folie|Seite|Slide)\s+(\d{1,3})/i))) inc.push([1, +m[1]]);
-    if ((m = clause.match(/\bab\s+(?:der\s+)?(?:Folie|Seite|Slide)\s+(\d{1,3})/i))) inc.push([+m[1], Infinity]);
+    for (const mm of clause.matchAll(/\bbis\s+(?:einschließlich\s+)?(?:zur\s+)?(?:Folie|Seite|Slide)\s+(\d{1,3})/gi)) {
+      if (!/\d\s*$/.test(clause.slice(0, mm.index))) refs.push({ at: mm.index, end: mm.index + mm[0].length, items: [[1, +mm[1]]], range: true });
+    }
+    for (const mm of clause.matchAll(/\bab\s+(?:der\s+)?(?:Folie|Seite|Slide)\s+(\d{1,3})/gi)) refs.push({ at: mm.index, end: mm.index + mm[0].length, items: [[+mm[1], Infinity]], range: true });
+    const owned = new Set(refs.map(r => partOf(r.at)));
+    for (const r of refs) {
+      const p1 = partOf(r.at), p2 = partOf(Math.max(r.at, r.end - 1));
+      const near = (re, x, y) => { let best = Infinity; for (const w of clause.slice(x, y).matchAll(re)) best = Math.min(best, Math.abs(x + w.index - r.at)); return best; };
+      let n = near(NOT, parts[p1][0], parts[p2][1]), o = near(ONLY, parts[p1][0], parts[p2][1]);
+      if (n === Infinity && o === Infinity) parts.forEach(([x, y], i) => { if (!owned.has(i) && (i < p1 || i > p2)) { n = Math.min(n, near(NOT, x, y)); o = Math.min(o, near(ONLY, x, y)); } });
+      const it = n < Infinity || o < Infinity ? (n < o ? 'exc' : 'inc') : r.range ? 'inc' : '';
+      if (it) (it === 'exc' ? exc : inc).push(...r.items);
+    }
   }
   return inc.length || exc.length ? { inc, exc } : null;
 }
 function slideFilter(req) {
   const field = ($('#slide-range').value || '').trim();
+  // The field wins over everything the instructions select, so a selection can be corrected there by hand.
   if (field) { const f = parseRangeField(field); return f ? Object.assign(f, { src: 'field' }) : null; }
-  const f = parseRangeReq(req || '');
-  return f ? Object.assign(f, { src: 'req' }) : null;
+  let f = parseRangeReq(req || '');
+  if (f) f.src = 'req';
+  // A selection Claude made for this instruction and this material ("nur Folien mit einem weißen Punkt") holds as well.
+  const p = pickFor(req);
+  if (p) { f = f || { inc: [], exc: [], src: 'req' }; f.pick = p.pick; }
+  return f;
 }
-const inFilter = (u, f) => !f || ((!f.inc.length || f.inc.some(([a, b]) => u.num >= a && u.num <= b)) && !f.exc.some(([a, b]) => u.num >= a && u.num <= b));
+const inFilter = (u, f) => !f || ((!f.inc.length || f.inc.some(([a, b]) => u.num >= a && u.num <= b)) && !f.exc.some(([a, b]) => u.num >= a && u.num <= b) && (!f.pick || (f.pick[u.fileName] || []).includes(u.num)));
+// "2, 4–9, 12"
+function compactNums(nums) {
+  const parts = [];
+  for (const n of Array.from(new Set(nums)).sort((a, b) => a - b)) { const last = parts[parts.length - 1]; if (last && n === last[1] + 1) last[1] = n; else parts.push([n, n]); }
+  return parts.map(([a, b]) => (a === b ? String(a) : `${a}–${b}`)).join(', ');
+}
 function describeFilter(f) {
   const r = ([a, b]) => b === Infinity ? 'ab ' + a : a === b ? String(a) : `${a}–${b}`;
-  return [f.inc.length ? 'nur Folien ' + f.inc.map(r).join(', ') : '', f.exc.length ? 'ohne Folien ' + f.exc.map(r).join(', ') : ''].filter(Boolean).join(', ');
+  const picked = f.pick ? Object.entries(f.pick).filter(([, n]) => n.length) : [];
+  const sorted = list => list.slice().sort((x, y) => x[0] - y[0]);
+  return [f.inc.length ? 'nur Folien ' + sorted(f.inc).map(r).join(', ') : '', f.exc.length ? 'ohne Folien ' + sorted(f.exc).map(r).join(', ') : '',
+    f.pick ? 'laut deiner Anweisung Folien ' + (picked.length > 1 ? picked.map(([name, n]) => `${compactNums(n)} (${name})`).join('; ') : picked.length ? compactNums(picked[0][1]) : 'keine') : ''].filter(Boolean).join(', ');
 }
 function renderSlideRangeHint() {
   const hint = $('#slide-range-hint'), field = $('#slide-range').value.trim();
-  const fc = slideFilter($('#card-req').value), fq = slideFilter($('#quiz-req').value);
-  if (field && !fc) { hint.className = 'hint msg err'; hint.textContent = 'Nicht verstanden. Beispiele: 1–16 · 1–16, 20 · ab 5 · ohne 1–3'; return; }
+  const rc = $('#card-req').value, rq = $('#quiz-req').value;
+  const fc = slideFilter(rc), fq = slideFilter(rq);
+  if (field && !fc) { hint.className = 'hint msg err'; hint.textContent = 'Nicht verstanden. Beispiele: 1–16 · 1–16, 20 · ab 5 · ohne 1–3 · 1–16 ohne 4'; return; }
   hint.className = 'hint';
-  if (field) hint.textContent = `Gilt für Karten, Lückensuche und Quiz: ${describeFilter(fc)}.`;
-  else if (fc || fq) hint.textContent = [fc ? `Aus deinen Karten-Anforderungen: ${describeFilter(fc)}.` : '', fq ? `Aus deinen Quiz-Anforderungen: ${describeFilter(fq)}.` : ''].filter(Boolean).join(' ');
-  else hint.textContent = '';
+  if (field) { hint.textContent = `Gilt für Karten, Lückensuche und Quiz: ${describeFilter(fc)}.`; return; }
+  const later = what => `Welche Folien deine ${what} auswählen, prüft Claude vor dem Erstellen Folie für Folie${pdfDocs.size ? ' anhand der Folienbilder' : ''}.`;
+  const part = (f, req, what) => (f ? `Aus deinen ${what}: ${describeFilter(f)}.` : '') + (needsPick(req) && !pickFor(req) ? ' ' + later(what) : '');
+  const text = [part(fc, rc, 'Karten-Anforderungen'), part(fq, rq, 'Quiz-Anforderungen')].map(x => x.trim()).filter(Boolean).join(' ');
+  // A selection Claude made can be checked again, or taken over into the field and corrected there.
+  const p = pickFor(rc) || pickFor(rq), req = pickFor(rc) ? rc : rq;
+  const nums = p ? Object.values(p.pick) : [];
+  fill(hint, text, p ? ' ' : null,
+    p && nums.length === 1 ? el('button', { type: 'button', class: 'btn small ghost', onclick: () => { const f = $('#slide-range'); f.value = compactNums(nums[0]); f.dispatchEvent(new Event('input', { bubbles: true })); } }, 'Ins Feld übernehmen') : null,
+    p ? el('button', { type: 'button', class: 'btn small ghost', onclick: () => { delete picks[pickKey(req)]; store.set('picks', picks); renderSlideRangeHint(); renderCoverage(); } }, 'Neu prüfen lassen') : null);
+}
+// Instructions that pick slides by what is on them ("nur Folien mit einem weißen Punkt", "keine Karten zu Folien mit
+// Literaturangaben") cannot be read from numbers. Before cards or a quiz are made, Claude decides once for every slide,
+// with the slide pictures when the PDF is loaded; the result holds like "Nur diese Folien" (cards, coverage, quiz).
+const PICK_WORD = /\b(nur|lediglich|ausschließlich|beschränk\w*|keine?|ohne|außer|nicht|weg|auslassen|weglassen|ignorier\w*)\b|überspring/i;
+function needsPick(req) {
+  return String(req || '').split(/[.;!?\n]+/).some(c => /\b(Folien?|Seiten?|Slides?)\b/i.test(c) && PICK_WORD.test(c) && !/\d/.test(c));
+}
+let picks = store.get('picks', {});
+function pickKey(req) {
+  const mat = state.files.filter(f => f.status === 'ok').map(f => f.name + ':' + f.count).join('|');
+  return hash53(String(req || '').trim() + '\x1f' + mat).toString(36);
+}
+function pickFor(req) { return needsPick(req) ? picks[pickKey(req)] || null : null; }
+function selectPrompt(req, units, withImages) {
+  return `Du wählst Vorlesungsfolien nach einer Anweisung des Nutzers aus.
+
+ANWEISUNG DES NUTZERS:
+${req}
+
+AUFGABE: Entscheide für jede Folie unten einzeln, ob sie laut dieser Anweisung dazugehört, also ob zu ihr Karteikarten oder Quizfragen erstellt werden sollen. Beachte nur die Teile der Anweisung, die Folien auswählen oder ausschließen; Wünsche zu Stil oder Inhalt der Karten spielen hier keine Rolle. Gibt die Anweisung gar keine Folienauswahl vor, gehören alle Folien dazu.
+${withImages ? `Zu jeder Folie ist ein Bild angehängt, in derselben Reihenfolge wie die Folien unten (Folien ${units.map(u => u.num).join(', ')}). Merkmale wie Symbole, Punkte, Markierungen, Farben oder Hervorhebungen erkennst du nur am Bild: Sieh dir jedes Bild einzeln und genau an, auch Kopfzeile, Ecken und Ränder, und entscheide für jede Folie neu.` : 'Es gibt keine Folienbilder, nur den ausgelesenen Text. Hängt die Auswahl an etwas, das man nur auf der Folie sieht (z. B. ein Symbol, einen Punkt oder eine Farbe), antworte nur mit {"visual":true}.'}
+
+AUSGABE: nur ein JSON-Objekt, ohne Codeblock und ohne weiteren Text: {"keep":[Nummern der Folien, die dazugehören]}
+
+FOLIEN:
+${units.map(u => `=== ${u.fileName} · ${u.label} ===\n${unitText(u).slice(0, 700) || '(kein Text)'}`).join('\n\n')}`;
+}
+// Runs the selection when the instruction needs one and none is stored for it; false when it failed or was stopped.
+async function ensurePick(req, msgEl, ctl) {
+  if (!needsPick(req) || pickFor(req) || $('#slide-range').value.trim()) return true;
+  const base = slideFilter(req);
+  const units = state.units.filter(u => inFilter(u, base));
+  if (!units.length) return true;
+  const batches = [];
+  for (const fid of Array.from(new Set(units.map(u => u.fileId)))) {
+    const list = units.filter(u => u.fileId === fid), img = pdfDocs.has(fid) && (caps.imageMax || 0) > 0;
+    const size = img ? Math.min(caps.imageMax, 20) : 80;
+    for (let i = 0; i < list.length; i += size) batches.push({ units: list.slice(i, i + size), img });
+  }
+  let done = 0, visual = false, err = null;
+  const keep = {};
+  const say = () => { msgEl.className = 'hint'; msgEl.textContent = `Claude wählt die Folien nach deiner Anweisung aus (${done} von ${batches.length} ${batches.length === 1 ? 'Teil' : 'Teilen'} fertig) …`; };
+  say();
+  await runPool(batches, POOL, ctl.signal, async b => {
+    try {
+      const imgs = b.img ? await Promise.all(b.units.map(u => claudeSlide(u.fileId, u.num))) : null;
+      const images = imgs && imgs.every(Boolean) ? imgs : null;
+      if (ctl.signal.aborted) return;
+      const res = await askJSON(selectPrompt(req, b.units, !!images), { tier: 'complex', effort: EFFORT.select, signal: ctl.signal, images: images || undefined });
+      if (res && res.visual) visual = true;
+      const nums = new Set(b.units.map(u => u.num)), name = b.units[0].fileName;
+      (keep[name] = keep[name] || []).push(...(Array.isArray(res && res.keep) ? res.keep : []).map(Number).filter(n => nums.has(n)));
+    } catch (e) { err = err || e; if (e && FATAL.has(e.code)) ctl.abort(); }
+    done++; say();
+  });
+  if (ctl.signal.aborted && !(err && FATAL.has(err.code))) { msgEl.textContent = 'Gestoppt.'; return false; }
+  msgEl.className = 'hint msg err';
+  if (err) { msgEl.textContent = 'Die Folienauswahl nach deiner Anweisung hat nicht geklappt: ' + errText(err); return false; }
+  if (visual) { msgEl.textContent = 'Für diese Anweisung muss Claude die Folien sehen. Lade die PDF links erneut (nach dem Neuladen der Seite fehlt sie) und starte noch einmal.'; return false; }
+  const n = Object.values(keep).reduce((a, k) => a + k.length, 0);
+  if (!n) { msgEl.textContent = 'Laut deiner Anweisung passt keine Folie. Prüfe die Anweisung.'; return false; }
+  Object.values(keep).forEach(k => k.sort((x, y) => x - y));
+  picks[pickKey(req)] = { pick: keep, n, of: units.length, at: Date.now() };
+  Object.keys(picks).sort((x, y) => picks[y].at - picks[x].at).slice(20).forEach(k => { delete picks[k]; });
+  store.set('picks', picks);
+  msgEl.className = 'hint';
+  msgEl.textContent = `Nach deiner Anweisung ausgewählt: ${n} von ${units.length} Folien.`;
+  renderSlideRangeHint();
+  return true;
 }
 function usableUnits(withImages) {
   return state.units.filter(u => unitText(u).length >= 3 || (withImages && pdfDocs.has(u.fileId)));
@@ -1296,10 +1400,10 @@ REGELN:
 - Reihenfolge der Karten = Reihenfolge im Material.
 - Sprache: ${langRule(o)}
 - Umfang: ${densityRule(o)}
-${Array.isArray(withImages) ? `- Zu ${withImages.length === 1 ? 'Folie' : 'den Folien'} ${withImages.join(', ')} ist je ein Bild angehängt (in dieser Reihenfolge), weil der ausgelesene Text dort Formeln oder unlesbare Zeichen enthält. Maßgeblich ist das Bild.\n` : withImages ? '- Zu jeder Folie ist ein Bild angehängt, in derselben Reihenfolge wie die Folien im Material. Nutze die Bilder für Diagramme, Abbildungen, Tabellen und Text, der im extrahierten Folientext fehlt.\n' : ''}
+${Array.isArray(withImages) ? `- Zu ${withImages.length === 1 ? 'Folie' : 'den Folien'} ${withImages.join(', ')} ist je ein Bild angehängt (in dieser Reihenfolge), weil der ausgelesene Text dort unvollständig ist (Formeln, unlesbare Zeichen oder kaum Text neben einer Abbildung). Maßgeblich ist das Bild.\n` : withImages ? '- Zu jeder Folie ist ein Bild angehängt, in derselben Reihenfolge wie die Folien im Material. Nutze die Bilder für Diagramme, Abbildungen, Tabellen und Text, der im extrahierten Folientext fehlt.\n' : ''}
 ANFORDERUNGEN DES NUTZERS (haben Vorrang vor allen anderen Regeln, auch vor Vollständigkeit und Umfang):
 ${o.req || '(keine)'}
-Schließen diese Anforderungen den ganzen Ausschnitt aus, antworte nur mit {"skip":true,"reason":"…"}.
+${o.filter && o.filter.pick ? 'Die Folienauswahl aus diesen Anforderungen ist schon angewendet: Jede Folie im Material gehört dazu. Lass keine davon wegen der Auswahl weg und antworte nicht mit "skip".' : 'Schließen diese Anforderungen den ganzen Ausschnitt aus, antworte nur mit {"skip":true,"reason":"…"}.'}
 
 ${libraryStyleBlock(o) || STYLE_EXAMPLES}
 
@@ -1507,6 +1611,7 @@ function renderExportHistory() {
     el('ul', {}, ...mine.map(h => el('li', { text: `${h.date}: ${h.deck} · ${karten(h.count)}` })))) : null);
 }
 function coveragePrompt(group, cardsInGroup, o) {
+  const without = group.units.filter(u => unitText(u).length >= 80 && !cardsInGroup.some(c => c.slide === u.num)).map(u => u.num);
   const list = cardsInGroup.map(c => `${c.id} | ${c.slide || '-'} | ${stripHtml(c.front).slice(0, 140)} → ${c.type === 'occlusion' ? 'Bildverdeckung: ' + c.occ.rects.map(r => r.label).filter(Boolean).join(', ').slice(0, 160) : stripHtml(c.back).slice(0, 100)}`).join('\n');
   return `Du prüfst ein Anki-Deck auf Vollständigkeit für eine Klausur in einem Psychologie-Studium (Ziel: Note 1,0).
 
@@ -1530,7 +1635,7 @@ ${formulaRules(o)}REGELN:
 
 ANFORDERUNGEN DES NUTZERS (haben Vorrang vor allen anderen Regeln):
 ${o.req || '(keine)'}
-
+${o.filter && o.filter.pick ? 'Die Folienauswahl aus diesen Anforderungen ist schon angewendet: Jede Folie im Material gehört dazu.\n' : ''}${without.length ? `\nFOLIEN NOCH OHNE KARTE (prüfe sie zuerst und ergänze, was dort prüfungsrelevant ist): ${without.join(', ')}\n` : ''}
 KARTENLISTE (ID | Folie | Vorderseite → Rückseite, gekürzt):
 ${list || '(noch keine Karten)'}
 
@@ -1668,7 +1773,7 @@ async function chunkImages(chunk) {
 }
 // Without "Folienbilder mitsenden", Claude still gets the slides whose text cannot be trusted (formulas, letter salad).
 async function checkImages(chunk) {
-  const pick = chunk.units.filter(u => u.check && pdfDocs.has(u.fileId)).slice(0, caps.imageMax || 0);
+  const pick = chunk.units.filter(u => (u.check || unitText(u).length < 40) && pdfDocs.has(u.fileId)).slice(0, caps.imageMax || 0);
   const blobs = await Promise.all(pick.map(u => claudeSlide(u.fileId, u.num)));
   const ok = pick.map((u, i) => [u.num, blobs[i]]).filter(([, b]) => b);
   return ok.length ? { images: ok.map(([, b]) => b), nums: ok.map(([n]) => n) } : null;
@@ -1709,8 +1814,9 @@ async function runCardJob(job, total, o) {
       },
     });
     await Promise.all(pending);
-    if (!job.n && !job.skip) throw { code: 'bad_shape' };
-    job.status = 'fertig'; job.done = !job.n ? 'übersprungen: ' + job.skip : karten(job.n) + (res.truncated ? ' (gekürzt, Lückensuche ergänzt den Rest)' : '');
+    // A section of picture-only or near-empty slides may rightly give no card.
+    if (!job.n && !job.skip && job.chunk.units.some(u => unitText(u).length >= 40)) throw { code: 'bad_shape' };
+    job.status = 'fertig'; job.done = !job.n ? (job.skip ? 'übersprungen: ' + job.skip : 'keine Karten (kaum Inhalt)') : karten(job.n) + (res.truncated ? ' (gekürzt, Lückensuche ergänzt den Rest)' : '');
   } catch (e) {
     await Promise.all(pending);
     // Cards that streamed in before a failure are complete and stay; a refusal withdraws them.
@@ -1743,10 +1849,16 @@ async function generateCards() {
   if (!state.units.length) { msg.textContent = 'Lade zuerst links Vorlesungsmaterial.'; return; }
   if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }
   const o = readCardOpts(); saveCardSettings();
+  // A selection by slide features is made first; it can be stopped like the cards.
+  cardCtl = new AbortController(); setCardBusy(true);
+  const picked = await ensurePick(o.req, msg, cardCtl);
+  setCardBusy(false);
+  if (!picked) return;
+  o.filter = slideFilter(o.req);
   const per = o.density === 'maximal' ? 6 : o.density === 'kompakt' ? 12 : 8;
   const maxChars = o.density === 'maximal' ? 5000 : o.density === 'kompakt' ? 12000 : 7000;
   const maxUnits = o.images ? Math.max(1, Math.min(per, caps.imageMax)) : per;
-  const chunks = makeChunks(usableUnits(o.images).filter(u => inFilter(u, o.filter)), maxChars, maxUnits, true);
+  const chunks = makeChunks(usableUnits(true).filter(u => inFilter(u, o.filter)), maxChars, maxUnits, true);
   if (!chunks.length) { msg.textContent = o.filter ? `In der Auswahl (${describeFilter(o.filter)}) ist kein Material.` : 'Im Material wurde kein Text gefunden. Aktiviere „Folienbilder mitsenden“ für gescannte PDFs.'; return; }
   const t0 = Date.now();
   state.cards = []; saveCards(); renderDeck();
@@ -1811,8 +1923,10 @@ async function continueCards() {
   const failed = cardJobs.filter(j => j.status === 'fehler').length;
   setCardBusy(false);
   if (fresh !== freshCount) return;
+  const bare = cardCtl.signal.aborted || failed ? [] : state.units.filter(u => inFilter(u, o.filter) && unitText(u).length >= 80 && !state.cards.some(c => c.fileId === u.fileId && c.slide === u.num));
   const secs = Math.round((Date.now() - started) / 1000);
   msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${karten(state.cards.length)} in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}.`;
+  if (bare.length) msg.textContent += ` Ohne Karte geblieben: ${bare.length === 1 ? 'Folie' : 'Folien'} ${compactNums(bare.map(u => u.num))} (im Raster rot). Prüfe sie mit „Lücken suchen“ oder per Klick auf die Folie.`;
 }
 // "Lücken suchen" by hand: all groups of the material at once.
 async function runCoverage() {
@@ -1820,6 +1934,8 @@ async function runCoverage() {
   if (!caps.sample) { $('#gen-cards-msg').textContent = errText({ code: 'unavailable' }); return; }
   const o = readCardOpts();
   cardCtl = new AbortController(); setCardBusy(true);
+  if (!(await ensurePick(o.req, $('#gen-cards-msg'), cardCtl))) { setCardBusy(false); return; }
+  o.filter = slideFilter(o.req);
   cardJobs = cardJobs.filter(j => j.kind !== 'cov');
   const groups = makeChunks(usableUnits(false).filter(u => inFilter(u, o.filter)), 16000, 30, true);
   const t = Date.now();
@@ -2661,7 +2777,7 @@ AUSSAGENBLOCK ("block"):
 
 ANFORDERUNGEN DES NUTZERS (haben Vorrang vor allen anderen Regeln):
 ${o.req || '(keine)'}
-
+${o.filter && o.filter.pick ? 'Die Folienauswahl aus diesen Anforderungen ist schon angewendet: Jede Folie im Material gehört dazu.\n' : ''}
 AUSGABE: Eine Frage pro Zeile als eigenständiges JSON-Objekt (JSON Lines), ohne umschließendes Array, ohne Codeblock, ohne weiteren Text und ohne Zeilenumbruch innerhalb einer Frage. Nur die angeforderten Typen, in diesen Formen:
 {"type":"tf","statement":"…","answer":true,"explanation":"…","slide":4,"topic":"…","level":"Verstehen"}
 {"type":"single","question":"…","options":[{"text":"…","correct":true,"why":"…"},{"text":"…","correct":false,"why":"…"}],"slide":7,"topic":"…","level":"Anwenden"}
@@ -2881,6 +2997,13 @@ async function generateQuiz(override) {
   if (!o.types.length) { msg.textContent = 'Wähle mindestens einen Fragetyp.'; return; }
   if (!state.units.length) { msg.textContent = 'Lade zuerst links Vorlesungsmaterial.'; return; }
   if (!caps.sample) { msg.textContent = errText({ code: 'unavailable' }); return; }
+  if (!override) {
+    quizCtl = new AbortController(); setQuizBusy(true);
+    const picked = await ensurePick(o.req, msg, quizCtl);
+    setQuizBusy(false);
+    if (!picked) return;
+    o.filter = slideFilter(o.req);
+  }
   // Split into as many parts as calls really run at once (each part gets about 4 or more questions).
   const units = usableUnits(false).filter(u => inFilter(u, o.filter));
   const total = units.reduce((a, u) => a + unitText(u).length + 60, 0);

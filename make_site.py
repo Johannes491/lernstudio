@@ -143,7 +143,7 @@ const usage = { cost: 0 };
 const POOL = 8;
 const RUNNING = POOL;
 // Card writing is extraction, so little thinking is needed; checks and distractors get a bit more.
-const EFFORT = { cards: 'low', coverage: 'medium', quiz: 'medium', grade: 'low' };
+const EFFORT = { cards: 'low', coverage: 'medium', quiz: 'medium', grade: 'low', select: 'medium' };
 const FATAL = new Set(['no_key', 'auth', 'permission', 'spend_cap', 'billing', 'model']);
 function errText(e) {
   if (e instanceof Error) return e.message;
