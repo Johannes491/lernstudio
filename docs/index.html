@@ -2495,6 +2495,7 @@ const covers = (r, b) => {
 };
 const boxStyle = r => `left:${r.x * 100}%;top:${r.y * 100}%;width:${r.w * 100}%;height:${r.h * 100}%`;
 const labelKey = s => String(s).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+const labelCase = s => String(s).normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, '');
 // Each suggested label is looked up on the slide: as a whole line, as two or three lines in a row (wrapped labels),
 // or as part of a horizontal line. Labels that are not found are left out.
 function findLabels(labels, boxes) {
@@ -2516,7 +2517,10 @@ function findLabels(labels, boxes) {
       }
     }
     if (hit) { hit.forEach(k => used.add(k)); rects.push(rectOf(unionBox(hit.map(k => boxes[k])), label)); continue; }
-    const part = want.length >= 3 ? keys.findIndex((k, i) => !used.has(i) && boxes[i].flat && k.length <= want.length * 4 && k.includes(want)) : -1;
+    // A part of a line only with the exact spelling: "ADOLESCENCE LIMITED" in a scanned figure must not find the
+    // bullet point "Adolescence-limited offenders" next to it (the figure would give the answer away).
+    const exact = labelCase(label);
+    const part = want.length >= 3 ? keys.findIndex((k, i) => !used.has(i) && boxes[i].flat && k.length <= want.length * 4 && labelCase(boxes[i].text).includes(exact)) : -1;
     if (part >= 0) {
       const b = boxes[part], k = keys[part], at = k.indexOf(want);
       rects.push(rectOf({ x: b.x + b.w * at / k.length, y: b.y, w: b.w * want.length / k.length, h: b.h }, label));
