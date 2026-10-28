@@ -360,6 +360,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
           <div class="grid2">
             <fieldset>
               <legend>Umfang</legend>
+              <label class="choice"><input type="radio" name="density" value="sehrkompakt"><span>Sehr kompakt<small>Nur das Wichtigste, etwa 1 Karte pro 2–3 Folien</small></span></label>
               <label class="choice"><input type="radio" name="density" value="kompakt"><span>Kompakt<small>Kernkonzepte, etwa 1 Karte pro Folie</small></span></label>
               <label class="choice"><input type="radio" name="density" value="vollstaendig" checked><span>Vollständig<small>Jede prüfungsrelevante Aussage, 1–3 Karten pro Folie</small></span></label>
               <label class="choice"><input type="radio" name="density" value="maximal"><span>Maximal<small>Zusätzlich Detail- und Verständnisfragen</small></span></label>
@@ -1292,6 +1293,38 @@ function slideFilter(req) {
   return f;
 }
 const inFilter = (u, f) => !f || ((!f.inc.length || f.inc.some(([a, b]) => u.num >= a && u.num <= b)) && !f.exc.some(([a, b]) => u.num >= a && u.num <= b) && (!f.pick || (f.pick[u.fileName] || []).includes(u.num)));
+// Cards that ask the same thing twice: lectures repeat content on several slides (build-up and summary slides), and
+// sections written in parallel do not see each other's cards. After a run, near-identical cards are removed: when
+// front and back share at least half their content words, or the questions are the same and the answers largely.
+// Cards that each have a number the other lacks ("16 Faktoren" / "3 Faktoren", two study years) are never duplicates.
+// The reverse card stays (it asks both ways), else the one with more content, else the earlier one.
+function findDuplicates(cards) {
+  const items = cards.filter(c => c.type !== 'occlusion' && !c.draft).map(c => {
+    const f = tokensOf(normFront(c.front)), b = tokensOf(normFront(c.back || ''));
+    return { c, f, all: new Set([...f, ...b]) };
+  });
+  const jac = (x, y) => { let k = 0; x.forEach(w => { if (y.has(w)) k++; }); return k / ((x.size + y.size - k) || 1); };
+  const nums = x => [...x.all].filter(w => /\d/.test(w));
+  const numClash = (a, b) => nums(a).some(w => !b.all.has(w)) && nums(b).some(w => !a.all.has(w));
+  const better = (a, b) => (a.c.type === 'reverse') !== (b.c.type === 'reverse') ? a.c.type === 'reverse' : a.all.size >= b.all.size;
+  const gone = new Set();
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length && !gone.has(items[i].c); j++) {
+      const a = items[i], b = items[j];
+      if (gone.has(b.c) || a.all.size < 4 || b.all.size < 4 || numClash(a, b)) continue;
+      const all = jac(a.all, b.all);
+      if (all >= 0.5 || (jac(a.f, b.f) >= 0.9 && all >= 0.4)) gone.add(better(a, b) ? b.c : a.c);
+    }
+  }
+  return gone;
+}
+function dropDuplicates() {
+  const gone = findDuplicates(state.cards);
+  if (!gone.size) return 0;
+  state.cards = state.cards.filter(c => !gone.has(c));
+  saveCards(); renderDeck();
+  return gone.size;
+}
 // "2, 4–9, 12"
 function compactNums(nums) {
   const parts = [];
@@ -1572,15 +1605,16 @@ function formulaRules(o) {
 function langRule(o) {
   return { auto: 'Schreibe in der Sprache der jeweiligen Folien: deutsche Folien → deutsche Karten, englische Folien → englische Karten.', de: 'Schreibe auf Deutsch. Stehen die Folien auf Englisch, ergänze den englischen Fachbegriff in Klammern.', en: 'Write the cards in English.' }[o.lang];
 }
+const compact = o => o.density === 'kompakt' || o.density === 'sehrkompakt';
 function densityRule(o) {
-  return { kompakt: 'Kompakt: nur die Kernkonzepte, etwa 1 Karte pro inhaltlicher Folie; Details zusammenfassen.', vollstaendig: 'Vollständig: jede prüfungsrelevante Aussage, etwa 1–3 Karten pro inhaltlicher Folie. Lieber eine Karte mehr als eine Lücke.', maximal: 'Maximal: zusätzlich Detailwissen und Verständnisfragen (Warum? Wie hängt … zusammen? Was folgt daraus?), etwa 2–4 Karten pro inhaltlicher Folie.' }[o.density];
+  return { sehrkompakt: 'Sehr kompakt: nur das Wichtigste, also die zentralen Fachbegriffe, die Kernaussagen von Theorien und Modellen und die wichtigsten Befunde, etwa 1 Karte pro 2–3 inhaltlichen Folien. Details, Beispiele, Zahlen ohne zentrale Bedeutung und Nebenaspekte weglassen; Rückseiten kurz, höchstens 3 Stichpunkte. Diese Regel hat Vorrang vor der Liste der abzudeckenden Inhalte.', kompakt: 'Kompakt: nur die Kernkonzepte, etwa 1 Karte pro inhaltlicher Folie; Details zusammenfassen.', vollstaendig: 'Vollständig: jede prüfungsrelevante Aussage, etwa 1–3 Karten pro inhaltlicher Folie. Lieber eine Karte mehr als eine Lücke.', maximal: 'Maximal: zusätzlich Detailwissen und Verständnisfragen (Warum? Wie hängt … zusammen? Was folgt daraus?), etwa 2–4 Karten pro inhaltlicher Folie.' }[o.density];
 }
 function courseLine() {
   const c = $('#course').value.trim(), l = $('#lecture').value.trim();
   return `Kurs: ${c || '(nicht angegeben)'}\nVorlesung: ${l || '(nicht angegeben)'}`;
 }
 function cardPrompt(chunk, idx, total, o, withImages) {
-  return `Du erstellst Anki-Karteikarten aus Vorlesungsmaterial für ein Psychologie-Studium. Ziel ist eine 1,0 in der Klausur: Jeder prüfungsrelevante Inhalt des Materials muss durch mindestens eine Karte abgedeckt sein.
+  return `Du erstellst Anki-Karteikarten aus Vorlesungsmaterial für ein Psychologie-Studium. ${o.density === 'sehrkompakt' ? 'Ziel ist ein sehr kompaktes Deck mit nur dem Wichtigsten der Vorlesung.' : 'Ziel ist eine 1,0 in der Klausur: Jeder prüfungsrelevante Inhalt des Materials muss durch mindestens eine Karte abgedeckt sein.'}
 
 ${courseLine()}
 Ausschnitt: Teil ${idx + 1} von ${total} (${chunkLabel(chunk)}). Erstelle Karten nur für diesen Ausschnitt.
@@ -1593,6 +1627,7 @@ ${formulaRules(o)}${COVER_RULES}
 
 REGELN:
 - Nutze nur Inhalte aus dem Material. Erfinde keine Fakten, Studien, Jahreszahlen oder Zahlen. Enthält eine Folie nur Stichworte, bleib nah an diesen Stichworten. Einzige Ausnahme: die Lösung von Wiederholungs- und Quizfragen (siehe oben).
+- Jeder Inhalt genau einmal: Wiederholt eine Folie Inhalte einer anderen (Aufbau-, Wiederholungs- oder Zusammenfassungsfolie), schreibe die Karte nur einmal, zur vollständigsten Fassung. Keine Umkehrkarte zu einem Begriff, zu dem es schon eine Frage-Karte gibt, und kein Lückentext zu einem Satz, der schon als Frage abgefragt wird.
 - Ausgelesener Folientext ist bei Formeln oft unvollständig: Klammern, Brüche, Wurzeln, Exponenten und Summenzeichen fehlen (z. B. „VAR X = E X − E X 2“ statt VAR(X) = E((X − E(X))<sup>2</sup>)). Bei manchen PDFs ist er Zeichensalat. Rekonstruiere Formeln in der üblichen Notation des Fachs und prüfe sie an den Rechenbeispielen der Folien. Wo ein Folienbild beiliegt, ist es maßgeblich. Unlesbare Stellen ohne Bild lässt du weg, statt zu raten.
 - "slide": die Nummer N aus der Überschrift „=== Datei · Folie N ===“ (bzw. Seite/Abschnitt N), aus der die Karte stammt.
 - "topic": Unterthema in 1–4 Wörtern; für alle Karten zum selben Thema gleich geschrieben.
@@ -1864,7 +1899,7 @@ function renderExportHistory() {
     el('ul', {}, ...mine.map(h => el('li', { text: `${h.date}: ${h.deck} · ${karten(h.count)}` })))) : null);
 }
 function coveragePrompt(group, cardsInGroup, o) {
-  const without = group.units.filter(u => unitText(u).length >= 80 && !cardsInGroup.some(c => c.slide === u.num)).map(u => u.num);
+  const without = compact(o) ? [] : group.units.filter(u => unitText(u).length >= 80 && !cardsInGroup.some(c => c.slide === u.num)).map(u => u.num);
   const list = cardsInGroup.map(c => `${c.id} | ${c.slide || '-'} | ${stripHtml(c.front).slice(0, 140)} → ${c.type === 'occlusion' ? 'Bildverdeckung: ' + c.occ.rects.map(r => r.label).filter(Boolean).join(', ').slice(0, 160) : stripHtml(c.back).slice(0, 100)}`).join('\n');
   return `Du prüfst ein Anki-Deck auf Vollständigkeit für eine Klausur in einem Psychologie-Studium (Ziel: Note 1,0).
 
@@ -1872,7 +1907,7 @@ ${courseLine()}
 Material: ${chunkLabel(group)}
 
 AUFGABE:
-1. Gehe das Material Folie für Folie durch und vergleiche es mit der Kartenliste. Erstelle neue Karten für jeden prüfungsrelevanten Inhalt, der noch NICHT abgedeckt ist. Erstelle keine Karten zu Inhalten, die schon abgedeckt sind.
+1. Gehe das Material Folie für Folie durch und vergleiche es mit der Kartenliste. ${compact(o) ? `Das Deck ist bewusst ${o.density === 'sehrkompakt' ? 'sehr ' : ''}kompakt (${densityRule(o)}). Ergänze nur zentrale Inhalte, die in diesem Umfang fehlen.` : 'Erstelle neue Karten für jeden prüfungsrelevanten Inhalt, der noch NICHT abgedeckt ist.'} Erstelle keine Karten zu Inhalten, die schon abgedeckt sind, auch nicht anders formuliert.
 2. Nenne in "duplicates" die IDs von Karten ein, die inhaltlich eine andere Karte der Liste wiederholen (jeweils nur die schwächere der beiden). Karten mit „Bildverdeckung:“ fragen die Lage im Diagramm ab und sind nie Dubletten.
 
 ${COVER_RULES}
@@ -1883,6 +1918,7 @@ ${typeRules(o)}
 
 ${formulaRules(o)}REGELN:
 - Nur Inhalte aus dem Material, nichts erfinden.
+- Keine neue Karte, die eine Karte der Liste inhaltlich wiederholt, auch nicht als Umkehrkarte oder Lückentext.
 - "slide": die Nummer N aus der Überschrift „=== Datei · Folie N ===“.
 - Sprache: ${langRule(o)}
 
@@ -2090,6 +2126,8 @@ async function retryCardJob(job) {
   const waiting = cardJobs.filter(j => j.kind === 'cov' && j.status === 'wartet' && j.group);
   if (waiting.length) await runQueue(waiting, POOL, cardCtl.signal, j => runCoverageJob(j, j.opts || o), covReady);
   setCardBusy(false);
+  const removed = cardCtl.signal.aborted ? 0 : dropDuplicates();
+  if (removed) $('#gen-cards-msg').textContent = `${removed} doppelte ${removed === 1 ? 'Karte' : 'Karten'} entfernt.`;
 }
 function setCardBusy(b) {
   $('#gen-cards').disabled = b; $('#stop-cards').hidden = !b; $('#run-coverage').disabled = b; $('#export-apkg').disabled = b; $('#send-anki').disabled = b;
@@ -2108,8 +2146,8 @@ async function generateCards() {
   setCardBusy(false);
   if (!picked) return;
   o.filter = slideFilter(o.req);
-  const per = o.density === 'maximal' ? 6 : o.density === 'kompakt' ? 12 : 8;
-  const maxChars = o.density === 'maximal' ? 5000 : o.density === 'kompakt' ? 12000 : 7000;
+  const per = { maximal: 6, kompakt: 12, sehrkompakt: 16 }[o.density] || 8;
+  const maxChars = { maximal: 5000, kompakt: 12000, sehrkompakt: 16000 }[o.density] || 7000;
   const maxUnits = o.images ? Math.max(1, Math.min(per, caps.imageMax)) : per;
   const chunks = makeChunks(usableUnits(true).filter(u => inFilter(u, o.filter)), maxChars, maxUnits, true);
   if (!chunks.length) { msg.textContent = o.filter ? `In der Auswahl (${describeFilter(o.filter)}) ist kein Material.` : 'Im Material wurde kein Text gefunden. Aktiviere „Folienbilder mitsenden“ für gescannte PDFs.'; return; }
@@ -2176,9 +2214,11 @@ async function continueCards() {
   const failed = cardJobs.filter(j => j.status === 'fehler').length;
   setCardBusy(false);
   if (fresh !== freshCount) return;
-  const bare = cardCtl.signal.aborted || failed ? [] : state.units.filter(u => inFilter(u, o.filter) && unitText(u).length >= 80 && !state.cards.some(c => c.fileId === u.fileId && c.slide === u.num));
+  const removed = cardCtl.signal.aborted ? 0 : dropDuplicates();
+  const bare = cardCtl.signal.aborted || failed || compact(o) ? [] : state.units.filter(u => inFilter(u, o.filter) && unitText(u).length >= 80 && !state.cards.some(c => c.fileId === u.fileId && c.slide === u.num));
   const secs = Math.round((Date.now() - started) / 1000);
   msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${karten(state.cards.length)} in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}${costNote(cost0)}.`;
+  if (removed) msg.textContent += ` ${removed} doppelte ${removed === 1 ? 'Karte' : 'Karten'} entfernt.`;
   if (bare.length) msg.textContent += ` Ohne Karte geblieben: ${bare.length === 1 ? 'Folie' : 'Folien'} ${compactNums(bare.map(u => u.num))} (im Raster rot). Prüfe sie mit „Lücken suchen“ oder per Klick auf die Folie.`;
 }
 // "Lücken suchen" by hand: all groups of the material at once.
@@ -2196,12 +2236,15 @@ async function runCoverage() {
   cardJobs.push(...jobs); paintCardProgress();
   await runPool(jobs, POOL, cardCtl.signal, job => runCoverageJob(job, o));
   setCardBusy(false);
+  const removed = cardCtl.signal.aborted ? 0 : dropDuplicates();
   const added = state.cards.filter(c => c.added).length;
-  $('#gen-cards-msg').textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : `Abdeckung geprüft. ${added} ergänzte Karten im Deck.`;
+  $('#gen-cards-msg').textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : `Abdeckung geprüft. ${added} ergänzte Karten im Deck.` + (removed ? ` ${removed} doppelte ${removed === 1 ? 'Karte' : 'Karten'} entfernt.` : '');
 }
 async function runCoverageJob(job, opts) {
   const o = Object.assign({}, opts, { images: false });
-  job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0; paintCardProgress();
+  job.status = 'läuft'; job.err = null; job.live = ''; job.n = 0;
+  state.cards = state.cards.filter(c => c.job !== job.key);
+  paintCardProgress();
   const g = job.group;
   const lo = g.units[0].num, hi = g.units[g.units.length - 1].num;
   const inGroup = state.cards.filter(c => c.fileId === g.fileId && c.slide >= lo && c.slide <= hi);
