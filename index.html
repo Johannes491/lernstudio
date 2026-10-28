@@ -359,7 +359,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
           <ol id="card-progress" class="progress" aria-live="polite"></ol>
           <details class="method">
             <summary>Wie die Karten entstehen</summary>
-            <p>Das Material wird in gleich große Abschnitte geteilt, die parallel bearbeitet werden. Kopfzeilen, die auf jeder Folie stehen, werden vorher entfernt. Für jeden Abschnitt schreibt Claude Karten im Stil deiner bisherigen Decks: kurze Frage vorne, Stichpunkte hinten, Fachbegriffe fett, Anzahl bei Aufzählungen, Folie als Quelle. Dabei gilt das Minimum-Information-Prinzip (eine Karte, ein Gedanke), und Claude nutzt nur das Material. Die Karten erscheinen, sobald sie geschrieben sind. Danach prüft ein zweiter Durchgang Folie für Folie, was noch fehlt, und markiert doppelte Karten.</p>
+            <p>Das Material wird in gleich große Abschnitte geteilt, die parallel bearbeitet werden. Kopfzeilen, die auf jeder Folie stehen, werden vorher entfernt. Für jeden Abschnitt schreibt Claude Karten im Stil deiner bisherigen Decks: kurze Frage vorne, Stichpunkte hinten, Fachbegriffe fett, Anzahl bei Aufzählungen, Folie als Quelle. Dabei gilt das Minimum-Information-Prinzip (eine Karte, ein Gedanke), und Claude nutzt nur das Material. Die Karten erscheinen, sobald sie geschrieben sind. Danach prüft ein zweiter Durchgang Folie für Folie, was noch fehlt und welche Karten nur wiederholen, was schon auf anderen steht. Am Ende entfernt das Lernstudio Karten, deren Inhalt fast vollständig schon auf einer anderen Karte steht, etwa einen Lückentext zu einer schon gestellten Frage.</p>
           </details>
         </div>
 
@@ -1107,26 +1107,37 @@ function slideFilter(req) {
 }
 const inFilter = (u, f) => !f || ((!f.inc.length || f.inc.some(([a, b]) => u.num >= a && u.num <= b)) && !f.exc.some(([a, b]) => u.num >= a && u.num <= b) && (!f.pick || (f.pick[u.fileName] || []).includes(u.num)));
 // Cards that ask the same thing twice: lectures repeat content on several slides (build-up and summary slides), and
-// sections written in parallel do not see each other's cards. After a run, near-identical cards are removed: when
-// front and back share at least half their content words, or the questions are the same and the answers largely.
-// Cards that each have a number the other lacks ("16 Faktoren" / "3 Faktoren", two study years) are never duplicates.
-// The reverse card stays (it asks both ways), else the one with more content, else the earlier one.
+// sections written in parallel do not see each other's cards. After a run the Lernstudio removes
+// - near-identical cards: front and back share at least half their content words, or the questions are the same and
+//   the answers largely (the reverse card stays, as it asks both ways, else the one with more content);
+// - cards whose content is already on another card: at least 70 % of their content words are there (a cloze or
+//   reverse card for a fact a question already asks, an overview that a longer card repeats). Only from 12 content
+//   words on, so short cards on related terms ("deskriptive" / "konditionale Perspektive") stay. A cloze goes only if
+//   its gaps are asked there; what a cloze adds below the sentence is not asked and does not count;
+// - cards the coverage check marked as repeating another one, when at least 40 % of their words are on one card.
+// A card with a number the other lacks ("16 Faktoren" / "3 Faktoren", two study years) is never removed for it.
 function findDuplicates(cards) {
+  const words = html => tokensOf(normFront(html || ''));
   const items = cards.filter(c => c.type !== 'occlusion' && !c.draft).map(c => {
-    const f = tokensOf(normFront(c.front)), b = tokensOf(normFront(c.back || ''));
-    return { c, f, all: new Set([...f, ...b]) };
+    const f = words(c.front), all = new Set([...f, ...words(c.back)]);
+    const gaps = c.type === 'cloze' ? new Set(Array.from(String(c.front).matchAll(CLOZE_RE), m => [...words(m[2])]).flat()) : null;
+    return { c, f, all, asked: gaps ? f : all, gaps };
   });
+  const share = (x, y) => { let k = 0; x.forEach(w => { if (y.has(w)) k++; }); return k / (x.size || 1); };
   const jac = (x, y) => { let k = 0; x.forEach(w => { if (y.has(w)) k++; }); return k / ((x.size + y.size - k) || 1); };
-  const nums = x => [...x.all].filter(w => /\d/.test(w));
-  const numClash = (a, b) => nums(a).some(w => !b.all.has(w)) && nums(b).some(w => !a.all.has(w));
+  const ownNums = (x, y) => [...x.all].some(w => /\d/.test(w) && !y.all.has(w));
   const better = (a, b) => (a.c.type === 'reverse') !== (b.c.type === 'reverse') ? a.c.type === 'reverse' : a.all.size >= b.all.size;
+  const covered = (x, y) => !ownNums(x, y) && (!x.gaps || [...x.gaps].every(w => y.asked.has(w))) &&
+    ((x.all.size >= 12 && share(x.all, y.asked) >= 0.7) || (x.c.dupe && share(x.all, y.asked) >= 0.4));
   const gone = new Set();
   for (let i = 0; i < items.length; i++) {
     for (let j = i + 1; j < items.length && !gone.has(items[i].c); j++) {
       const a = items[i], b = items[j];
-      if (gone.has(b.c) || a.all.size < 4 || b.all.size < 4 || numClash(a, b)) continue;
+      if (gone.has(b.c) || a.all.size < 4 || b.all.size < 4 || (ownNums(a, b) && ownNums(b, a))) continue;
       const all = jac(a.all, b.all);
       if (all >= 0.5 || (jac(a.f, b.f) >= 0.9 && all >= 0.4)) gone.add(better(a, b) ? b.c : a.c);
+      else if (covered(a, b)) gone.add(a.c);
+      else if (covered(b, a)) gone.add(b.c);
     }
   }
   return gone;
@@ -1373,7 +1384,7 @@ const STYLE_RULES = `STIL – abgeleitet aus den bisherigen Anki-Decks des Nutze
 - Vorderseite: kurze, präzise Frage, meist unter 100 Zeichen. Typische Formen: „Was ist …?“, „Was sind …?“, „Wie funktioniert …?“, „Welche Rolle/Funktion hat …?“, „Nenne die … (Anzahl)“, „Erkläre …“, „Wie unterscheiden sich … und …?“, „Kritik an …?“, „Was zeigte die Studie von … (Jahr)?“. Bei Aufzählungen steht die Anzahl in Klammern am Ende, z. B. „(4)“.
 - Rückseite: Stichpunkte als HTML-Liste <ul><li>…</li></ul>; Abläufe, Phasen, Schritte und Rangfolgen als <ol><li>…</li></ol>. Meist 1–6 Stichpunkte, knapp und stichwortartig statt Fließtext (etwa 100–350 Zeichen). Zentrale Fachbegriffe <b>fett</b>. Folgen und Kausalität mit „→“. Beispiele mit „z. B.“. Fachbegriffe wie in den Folien, Abkürzungen in Klammern.
 - Erlaubtes HTML: <b>, <i>, <ul>, <ol>, <li>, <br>, <sub>, <sup>, <table>, <tr>, <th>, <td>. Kein Markdown, keine anderen Tags.
-- Eine Karte = ein Gedanke (Minimum-Information-Prinzip). Aufzählungen mit mehr als 7 Elementen aufteilen: eine Überblickskarte mit den Oberbegriffen plus Detailkarten.
+- Eine Karte = ein Gedanke (Minimum-Information-Prinzip). Aufzählungen mit mehr als 7 Elementen aufteilen: eine Überblickskarte nur mit den Oberbegriffen plus Detailkarten mit den Erklärungen.
 - Frage und Antwort müssen ohne die Folie verständlich sein. Kontext gehört in die Frage, z. B. „Im Rubikonmodell: …“.`;
 const COVER_RULES = `INHALTE, DIE ABGEDECKT WERDEN MÜSSEN (soweit im Material vorhanden):
 - Definitionen und Fachbegriffe
@@ -1443,7 +1454,11 @@ ${formulaRules(o)}${COVER_RULES}
 
 REGELN:
 - Nutze nur Inhalte aus dem Material. Erfinde keine Fakten, Studien, Jahreszahlen oder Zahlen. Enthält eine Folie nur Stichworte, bleib nah an diesen Stichworten. Einzige Ausnahme: die Lösung von Wiederholungs- und Quizfragen (siehe oben).
-- Jeder Inhalt genau einmal: Wiederholt eine Folie Inhalte einer anderen (Aufbau-, Wiederholungs- oder Zusammenfassungsfolie), schreibe die Karte nur einmal, zur vollständigsten Fassung. Keine Umkehrkarte zu einem Begriff, zu dem es schon eine Frage-Karte gibt, und kein Lückentext zu einem Satz, der schon als Frage abgefragt wird.
+- Keine Überschneidungen: Jede Information (Definition, Merkmal, Ursache, Zahl, Befund, Beispiel) steht auf genau einer Karte. Prüfe vor jeder Karte die Karten, die du schon geschrieben hast: Steht ihre Antwort dort schon ganz oder teilweise, lass die Karte weg oder frag nur ab, was neu ist. Das gilt besonders für
+  · Aufbau-, Wiederholungs- und Zusammenfassungsfolien: die Karte nur einmal schreiben, zur vollständigsten Fassung;
+  · Lückentext- und Umkehrkarten zu Inhalten, die schon eine Frage-Karte abfragt, und umgekehrt;
+  · Vergleichs-, Kritik- und Überblickskarten: nur der Unterschied, die Kritik oder die Oberbegriffe, nicht noch einmal die Erklärungen, die auf anderen Karten stehen;
+  · Rückseiten und Lückentext-Zusätze: nur, was die Frage verlangt, keine Punkte, die eine andere Karte abfragt.
 - Ausgelesener Folientext ist bei Formeln oft unvollständig: Klammern, Brüche, Wurzeln, Exponenten und Summenzeichen fehlen (z. B. „VAR X = E X − E X 2“ statt VAR(X) = E((X − E(X))<sup>2</sup>)). Bei manchen PDFs ist er Zeichensalat. Rekonstruiere Formeln in der üblichen Notation des Fachs und prüfe sie an den Rechenbeispielen der Folien. Wo ein Folienbild beiliegt, ist es maßgeblich. Unlesbare Stellen ohne Bild lässt du weg, statt zu raten.
 - "slide": die Nummer N aus der Überschrift „=== Datei · Folie N ===“ (bzw. Seite/Abschnitt N), aus der die Karte stammt.
 - "topic": Unterthema in 1–4 Wörtern; für alle Karten zum selben Thema gleich geschrieben.
@@ -1716,7 +1731,7 @@ function renderExportHistory() {
 }
 function coveragePrompt(group, cardsInGroup, o) {
   const without = compact(o) ? [] : group.units.filter(u => unitText(u).length >= 80 && !cardsInGroup.some(c => c.slide === u.num)).map(u => u.num);
-  const list = cardsInGroup.map(c => `${c.id} | ${c.slide || '-'} | ${stripHtml(c.front).slice(0, 140)} → ${c.type === 'occlusion' ? 'Bildverdeckung: ' + c.occ.rects.map(r => r.label).filter(Boolean).join(', ').slice(0, 160) : stripHtml(c.back).slice(0, 100)}`).join('\n');
+  const list = cardsInGroup.map(c => `${c.id} | ${c.slide || '-'} | ${stripHtml(c.front).slice(0, 140)} → ${c.type === 'occlusion' ? 'Bildverdeckung: ' + c.occ.rects.map(r => r.label).filter(Boolean).join(', ').slice(0, 160) : stripHtml(c.back).slice(0, 180)}`).join('\n');
   return `Du prüfst ein Anki-Deck auf Vollständigkeit für eine Klausur in einem Psychologie-Studium (Ziel: Note 1,0).
 
 ${courseLine()}
@@ -1724,7 +1739,7 @@ Material: ${chunkLabel(group)}
 
 AUFGABE:
 1. Gehe das Material Folie für Folie durch und vergleiche es mit der Kartenliste. ${compact(o) ? `Das Deck ist bewusst ${o.density === 'sehrkompakt' ? 'sehr ' : ''}kompakt (${densityRule(o)}). Ergänze nur zentrale Inhalte, die in diesem Umfang fehlen.` : 'Erstelle neue Karten für jeden prüfungsrelevanten Inhalt, der noch NICHT abgedeckt ist.'} Erstelle keine Karten zu Inhalten, die schon abgedeckt sind, auch nicht anders formuliert.
-2. Nenne in "duplicates" die IDs von Karten ein, die inhaltlich eine andere Karte der Liste wiederholen (jeweils nur die schwächere der beiden). Karten mit „Bildverdeckung:“ fragen die Lage im Diagramm ab und sind nie Dubletten.
+2. Nenne in "duplicates" die IDs von Karten, deren Inhalt ganz oder größtenteils schon auf einer anderen Karte der Liste steht: wörtliche oder umformulierte Wiederholungen, Lückentext- oder Umkehrkarten zu schon abgefragten Inhalten, Vergleichs- oder Zusammenfassungskarten, die nur Einzelkarten wiederholen. Jeweils nur die Karte, die weniger Neues bringt. Karten mit „Bildverdeckung:“ fragen die Lage im Diagramm ab und sind nie Dubletten.
 
 ${COVER_RULES}
 
@@ -1734,7 +1749,7 @@ ${typeRules(o)}
 
 ${formulaRules(o)}REGELN:
 - Nur Inhalte aus dem Material, nichts erfinden.
-- Keine neue Karte, die eine Karte der Liste inhaltlich wiederholt, auch nicht als Umkehrkarte oder Lückentext.
+- Keine neue Karte, deren Inhalt ganz oder teilweise schon auf einer Karte der Liste steht, auch nicht als Umkehrkarte, Lückentext, Vergleich oder Zusammenfassung.
 - "slide": die Nummer N aus der Überschrift „=== Datei · Folie N ===“.
 - Sprache: ${langRule(o)}
 
@@ -1943,7 +1958,7 @@ async function retryCardJob(job) {
   if (waiting.length) await runQueue(waiting, POOL, cardCtl.signal, j => runCoverageJob(j, j.opts || o), covReady);
   setCardBusy(false);
   const removed = cardCtl.signal.aborted ? 0 : dropDuplicates();
-  if (removed) $('#gen-cards-msg').textContent = `${removed} doppelte ${removed === 1 ? 'Karte' : 'Karten'} entfernt.`;
+  if (removed) $('#gen-cards-msg').textContent = `${removed} ${removed === 1 ? 'Karte' : 'Karten'} mit doppeltem Inhalt entfernt.`;
 }
 function setCardBusy(b) {
   $('#gen-cards').disabled = b; $('#stop-cards').hidden = !b; $('#run-coverage').disabled = b; $('#export-apkg').disabled = b; $('#send-anki').disabled = b;
@@ -2030,11 +2045,12 @@ async function continueCards() {
   const failed = cardJobs.filter(j => j.status === 'fehler').length;
   setCardBusy(false);
   if (fresh !== freshCount) return;
-  const removed = cardCtl.signal.aborted ? 0 : dropDuplicates();
+  // Before removing duplicates: a slide whose card repeated another one is covered.
   const bare = cardCtl.signal.aborted || failed || compact(o) ? [] : state.units.filter(u => inFilter(u, o.filter) && unitText(u).length >= 80 && !state.cards.some(c => c.fileId === u.fileId && c.slide === u.num));
+  const removed = cardCtl.signal.aborted ? 0 : dropDuplicates();
   const secs = Math.round((Date.now() - started) / 1000);
   msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${karten(state.cards.length)} in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}.`;
-  if (removed) msg.textContent += ` ${removed} doppelte ${removed === 1 ? 'Karte' : 'Karten'} entfernt.`;
+  if (removed) msg.textContent += ` ${removed} ${removed === 1 ? 'Karte' : 'Karten'} mit doppeltem Inhalt entfernt.`;
   if (bare.length) msg.textContent += ` Ohne Karte geblieben: ${bare.length === 1 ? 'Folie' : 'Folien'} ${compactNums(bare.map(u => u.num))} (im Raster rot). Prüfe sie mit „Lücken suchen“ oder per Klick auf die Folie.`;
 }
 // "Lücken suchen" by hand: all groups of the material at once.
@@ -2054,7 +2070,7 @@ async function runCoverage() {
   setCardBusy(false);
   const removed = cardCtl.signal.aborted ? 0 : dropDuplicates();
   const added = state.cards.filter(c => c.added).length;
-  $('#gen-cards-msg').textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : `Abdeckung geprüft. ${added} ergänzte Karten im Deck.` + (removed ? ` ${removed} doppelte ${removed === 1 ? 'Karte' : 'Karten'} entfernt.` : '');
+  $('#gen-cards-msg').textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : `Abdeckung geprüft. ${added} ergänzte Karten im Deck.` + (removed ? ` ${removed} ${removed === 1 ? 'Karte' : 'Karten'} mit doppeltem Inhalt entfernt.` : '');
 }
 async function runCoverageJob(job, opts) {
   const o = Object.assign({}, opts, { images: false });
