@@ -450,6 +450,20 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
                 <label class="choice" style="align-self:end"><input type="checkbox" id="opt-slideimg"><span>Folienbild auf der Rückseite<small id="opt-slideimg-hint">Wie in deinem Deck zur Persönlichkeitspsychologie. Nur für PDFs, die in dieser Sitzung geladen wurden.</small></span></label>
               </div>
               <p id="export-types" class="hint"></p>
+              <div id="types-needed" class="notice" hidden>
+                <b>Damit Anki keine neuen Notiztypen anlegt, braucht das Lernstudio einmal deine Anki-Sammlung.</b> Nur aus ihr erfährt es die internen Kennungen deiner Typen „Einfach“, „Lückentext“ und „Bildverdeckung“.
+                <ol>
+                  <li>In Anki: Datei → Exportieren → Format „Anki-Sammlungspaket (.colpkg)“, „Medien einschließen“ aus → Exportieren.</li>
+                  <li>Die Datei hier ablegen. Danach wird die Anki-Datei sofort gespeichert, und künftig ist dieser Schritt nicht mehr nötig.</li>
+                </ol>
+                <label class="drop" id="types-drop">
+                  <input type="file" id="types-input" accept=".colpkg,.apkg">
+                  <span class="drop-title">Anki-Sammlung hierher ziehen oder auswählen</span>
+                  <span class="drop-hint">.colpkg, ohne Medien</span>
+                </label>
+                <p id="types-msg" class="msg" role="status"></p>
+                <button type="button" id="types-skip" class="btn small ghost">Trotzdem mit Lernstudio-Notiztypen speichern</button>
+              </div>
               <label class="choice" id="only-new-row" hidden><input type="checkbox" id="opt-onlynew"><span id="only-new-label">Nur neue Karten exportieren</span></label>
               <div class="actions">
                 <button type="button" id="export-apkg" class="btn primary">Anki-Datei speichern</button>
@@ -1827,7 +1841,7 @@ function markKnown() {
 // After an export: remember which cards went out, per deck, for "only new cards" and the duplicate check.
 function recordExport(deckName, cards) {
   const d = new Date();
-  const notes = cards.flatMap(c => c.type === 'occlusion' ? c.occ.rects.map(r => ({ guid: c.guid + r.id, n: '', l: (r.label || '').slice(0, 120) }))
+  const notes = cards.flatMap(c => c.type === 'occlusion' ? noteGuids(c).map((guid, i) => ({ guid, n: '', l: (c.occ.rects.length === noteGuids(c).length ? c.occ.rects[i].label || '' : stripHtml(c.front)).slice(0, 120) }))
     : [{ guid: c.guid, n: normFront(c.front), l: stripHtml(c.front).slice(0, 120) }]);
   state.exportHistory.push({ deck: deckName, course: $('#course').value.trim(), date: `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`, at: d.toISOString(), count: notes.length,
     guids: notes.map(x => x.guid), fronts: notes.map(x => x.n), labels: notes.map(x => x.l) });
@@ -2478,7 +2492,8 @@ async function occlusionFromClaude(r, chunk) {
     fileId: chunk.fileId, fileName: chunk.fileName, slide, topic: String(r.topic || '').replace(/\s+/g, ' ').trim().slice(0, 60), added: false, occ: { mode: 'all', rects } };
 }
 // One Anki note per covered area.
-const noteGuids = c => c.type === 'occlusion' ? c.occ.rects.map(r => c.guid + r.id) : [c.guid];
+// With Anki's own image occlusion a card is one note; with the Lernstudio type every covered area is one.
+const noteGuids = c => c.type === 'occlusion' && !(ownAnkiTypes() || {}).io ? c.occ.rects.map(r => c.guid + r.id) : [c.guid];
 const noteCount = cards => cards.reduce((n, c) => n + noteGuids(c).length, 0);
 const mediaBase = deckName => `lernstudio-${tagSlug(deckName.replace(/::/g, '-')).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'deck'}-${hash53(deckName).toString(36).slice(0, 6)}`;
 // Anki's own image occlusion: one line per covered area; "oi=1" covers the other areas too ("alle verdecken").
@@ -4569,8 +4584,16 @@ function bind() {
   $('#opt-libdupes').addEventListener('change', () => { knownChanged(); renderDeck(true); });
   $('#deck-name').addEventListener('input', renderExportHistory);
   $('#clear-deck').addEventListener('click', e => armConfirm(e.currentTarget, 'Deck wirklich verwerfen?', () => { state.cards = []; cardJobs = []; cardRun = null; saveCardRun(); paintCardProgress(); saveCards(); renderDeck(); renderCardResume(); }));
-  const exportWith = send => async e => {
-    const b = e.currentTarget;
+  let pendingExport = null;
+  const exportWith = send => async (e, lernTypes) => {
+    const b = e.currentTarget || e.target;
+    if (send === exportDeck && !ownAnkiTypes() && lernTypes !== true) {
+      pendingExport = () => exportWith(send)({ currentTarget: b }, true);
+      $('#types-needed').hidden = false; $('#types-msg').textContent = '';
+      $('#types-needed').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      return;
+    }
+    $('#types-needed').hidden = true;
     const deckName = $('#deck-name').value.trim() || defaultDeckName();
     const exported = new Set(state.exportHistory.filter(h => h.deck === deckName).flatMap(h => h.guids));
     const onlyNew = !$('#only-new-row').hidden && $('#opt-onlynew').checked;
@@ -4589,6 +4612,29 @@ function bind() {
     b.disabled = false;
   };
   $('#export-apkg').addEventListener('click', exportWith(exportDeck));
+  const typesFrom = async files => {
+    const m = $('#types-msg');
+    m.className = 'msg'; m.textContent = 'Wird gelesen …';
+    const before = new Set(state.library);
+    await addLibraryFiles(files);
+    if (!ownAnkiTypes()) {
+      const last = state.library[state.library.length - 1];
+      // A file without note types of its own (e.g. a Lernstudio export) does not stay among "Meine Anki-Decks".
+      state.library = state.library.filter(d => before.has(d) || d.types);
+      knownChanged(); saveLibrary(); renderLibrary();
+      m.className = 'msg err';
+      m.textContent = last && last.status === 'error' ? last.error : 'In dieser Datei stehen keine eigenen Notiztypen (vielleicht ein Export aus dem Lernstudio). Exportiere in Anki die ganze Sammlung als .colpkg.';
+      return;
+    }
+    m.textContent = '';
+    if (pendingExport) { const run = pendingExport; pendingExport = null; run(); }
+  };
+  const tdrop = $('#types-drop');
+  $('#types-input').addEventListener('change', e => { typesFrom(e.target.files); e.target.value = ''; });
+  ['dragenter', 'dragover'].forEach(t => tdrop.addEventListener(t, e => { e.preventDefault(); tdrop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => tdrop.addEventListener(t, e => { e.preventDefault(); tdrop.classList.remove('over'); }));
+  tdrop.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length) typesFrom(e.dataTransfer.files); });
+  $('#types-skip').addEventListener('click', () => { const run = pendingExport; pendingExport = null; $('#types-needed').hidden = true; if (run) run(); });
   $('#send-anki').addEventListener('click', exportWith(sendToAnki));
   $('#send-anki').hidden = $('#send-anki-hint').hidden = !DIRECT_ANKI;
   ['input', 'change'].forEach(t => {
