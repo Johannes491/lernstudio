@@ -337,13 +337,15 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
           <label class="choice"><input type="checkbox" id="opt-formula" checked><span>Formeln und Rechenwege<small>Jede Formel als eigene Karte, dazu Rechenbeispiele mit Lösungsweg.</small></span></label>
           <details id="lib-box" class="method">
             <summary>Meine Anki-Decks: Stil und Dubletten <span id="lib-count" class="hint"></span></summary>
-            <p class="hint">Lade deine vorhandenen Decks als .apkg (in Anki: Datei → Exportieren). Claude übernimmt ihren Stil, und neue Karten, die es dort schon gibt, werden markiert. Die Decks bleiben in diesem Browser.</p>
+            <p class="hint">Lade deine vorhandenen Decks als .apkg (in Anki: Datei → Exportieren). Claude übernimmt ihren Stil, und neue Karten, die es dort schon gibt, werden markiert. Die Decks bleiben in diesem Browser gespeichert, auch bei „Neues Deck beginnen“. Mit „Als Stilvorlage speichern“ schreibt Claude jedes neue Deck in ihrem Stil.</p>
             <label class="drop" id="lib-drop">
               <input type="file" id="lib-input" multiple accept=".apkg,.colpkg">
               <span class="drop-title">Anki-Decks hierher ziehen oder auswählen</span>
               <span class="drop-hint">.apkg oder .colpkg, auch mehrere auf einmal</span>
             </label>
             <ul id="lib-list" class="file-list"></ul>
+            <div class="actions"><button type="button" id="lib-save" class="btn small" hidden>Als Stilvorlage speichern</button></div>
+            <p id="lib-msg" class="msg" aria-live="polite"></p>
             <label class="choice"><input type="checkbox" id="opt-libstyle"><span>Stil meiner Decks übernehmen<small id="opt-libstyle-hint">Beispiele und Kennzahlen aus deinen Decks, bevorzugt aus dem gleichen Kurs. Ohne diese Option gilt der Lernstudio-Stil.</small></span></label>
             <label class="choice"><input type="checkbox" id="opt-libdupes" checked><span>Karten markieren, die es schon gibt<small>Vergleicht jede neue Frage mit deinen Decks und mit früheren Exporten aus dem Lernstudio.</small></span></label>
           </details>
@@ -582,6 +584,27 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('lernstudio.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('lernstudio.' + k, JSON.stringify(v)); return true; } catch { return false; } },
   del(k) { try { localStorage.removeItem('lernstudio.' + k); } catch {} },
+};
+// Large, long-lived data (the user's Anki decks) goes to IndexedDB: localStorage holds only about 5 MB for everything,
+// shared with material, cards and old exams, and a full one fails silently.
+const bigStore = {
+  db: null,
+  open() {
+    return this.db || (this.db = new Promise((res, rej) => {
+      const r = indexedDB.open('lernstudio', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    }));
+  },
+  async get(k) {
+    const db = await this.open();
+    return new Promise((res, rej) => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+  },
+  async set(k, v) {
+    const db = await this.open();
+    return new Promise((res, rej) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = () => res(true); t.onerror = t.onabort = () => rej(t.error); });
+  },
 };
 const loadedScripts = {};
 function loadScript(src) {
@@ -1529,8 +1552,9 @@ async function readAnkiDeck(file) {
     const kindOf = t => !t ? 'basic' : /occlusion|bildverdeckung/i.test(t.name) ? 'skip' : t.cloze || /cloze|lückentext/i.test(t.name) || t.fields[0] === 'Text' ? 'cloze' : /umgekehrt|reverse/i.test(t.name) ? 'reverse' : 'basic';
     const fronts = [], pool = [], st = { f: [], b: [], list: 0, bold: 0, count: 0, enumq: 0, cloze: 0, reverse: 0 };
     const topDecks = new Map();
+    let mine = 0;
     for (const [id, mid, flds] of rows('SELECT id, mid, flds FROM notes')) {
-      const kind = kindOf(types.get(String(mid)));
+      const type = types.get(String(mid)), kind = kindOf(type);
       if (kind === 'skip') continue;
       const [front = '', back = ''] = String(flds).split('\x1f');
       const n = normFront(front);
@@ -1539,6 +1563,9 @@ async function readAnkiDeck(file) {
       const top = deck.split('::')[0];
       if (top && top !== 'Default') topDecks.set(top, (topDecks.get(top) || 0) + 1);
       fronts.push({ n, f: stripHtml(front.replace(/\{\{c\d+::(.*?)(::[^}]*)?\}\}/g, '$1')).slice(0, 120), d: deck });
+      // Cards the Lernstudio made (its note types, or its source line under the back) count for duplicates, not for style.
+      if ((type && /^Lernstudio/.test(type.name)) || back.includes('<span style="font-size:12px;color:#888">')) continue;
+      mine++;
       const ft = stripHtml(front), bt = stripHtml(back);
       st.f.push(ft.length); if (kind !== 'cloze') st.b.push(bt.length);
       if (/<(ul|ol)\b/i.test(back)) st.list++;
@@ -1554,7 +1581,7 @@ async function readAnkiDeck(file) {
     const examples = pool.map(x => [hash53(x.front), x]).sort((a, b) => a[0] - b[0]).slice(0, 24).map(([, x]) => x);
     const notes = fronts.length;
     return { deck: deck ? deck[0] : file.name.replace(/\.(apkg|colpkg)$/i, ''), notes, fronts, examples, types: own.basic ? own : null,
-      stats: { front: medianOf(st.f), back: medianOf(st.b), list: notes && st.b.length ? st.list / st.b.length : 0, bold: notes ? st.bold / notes : 0, count: st.enumq ? st.count / st.enumq : 0, cloze: notes ? st.cloze / notes : 0, reverse: notes ? st.reverse / notes : 0 } };
+      stats: { own: mine, front: medianOf(st.f), back: medianOf(st.b), list: st.b.length ? st.list / st.b.length : 0, bold: mine ? st.bold / mine : 0, count: st.enumq ? st.count / st.enumq : 0, cloze: mine ? st.cloze / mine : 0, reverse: mine ? st.reverse / mine : 0 } };
   } finally { db.close(); }
 }
 // The few protobuf fields the Lernstudio needs: numbers and texts by field number.
@@ -1604,11 +1631,15 @@ function cleanAnkiHtml(html) {
   return sanitize(String(html).replace(/&nbsp;|\u00a0/g, ' ').replace(/<\/div>\s*<div>/gi, '<br>').replace(/<\/?div[^>]*>/gi, ''))
     .replace(/(<br>\s*){2,}/g, '<br>').replace(/<br>\s*(<\/?(ul|ol|li)>)/g, '$1').replace(/(<\/?(ul|ol)>)\s*<br>/g, '$1').replace(/\s{2,}/g, ' ').replace(/^(<br>|\s)+|(<br>|\s)+$/g, '');
 }
-function saveLibrary() {
-  if (store.set('library', state.library)) return;
-  // Storage full: keep fewer style examples per deck.
-  if (!store.set('library', state.library.map(d => Object.assign({}, d, { examples: d.examples.slice(0, 8) })))) store.set('library', state.library.map(d => Object.assign({}, d, { examples: [] })));
+// Saved: the decks that were read; true when they are stored.
+async function saveLibrary() {
+  const ok = state.library.filter(d => d.status === 'ok');
+  try { await bigStore.set('library', ok); store.del('library'); return true; } catch {}
+  // Without IndexedDB: localStorage, with fewer style examples per deck if it is full.
+  return store.set('library', ok) || store.set('library', ok.map(d => Object.assign({}, d, { examples: d.examples.slice(0, 8) })));
 }
+const libMsg = (text, err) => { const m = $('#lib-msg'); m.className = 'msg' + (err ? ' err' : ''); m.textContent = text; };
+const NOT_SAVED = 'Die Decks konnten in diesem Browser nicht dauerhaft gespeichert werden (Speicher voll oder gesperrt, etwa im privaten Fenster). Sie gelten nur, bis die Seite geschlossen wird.';
 async function addLibraryFiles(list) {
   for (const file of Array.from(list)) {
     const entry = { id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), file: file.name, status: 'lädt' };
@@ -1620,22 +1651,30 @@ async function addLibraryFiles(list) {
     } catch (err) {
       entry.status = 'error'; entry.error = (err && err.message) || 'Die Datei konnte nicht gelesen werden.';
     }
-    knownChanged(); saveLibrary(); renderLibrary(); renderDeck(true);
+    knownChanged(); renderLibrary(); renderDeck(true);
+    if (!(await saveLibrary())) libMsg(NOT_SAVED, true);
   }
 }
 function renderLibrary() {
   const ok = state.library.filter(d => d.status === 'ok');
-  $('#lib-count').textContent = ok.length ? `(${ok.length} ${ok.length === 1 ? 'Deck' : 'Decks'}, ${ok.reduce((a, d) => a + d.notes, 0).toLocaleString('de-DE')} Karten)` : '';
+  const tpl = ok.filter(d => d.template);
+  $('#lib-count').textContent = ok.length ? `(${ok.length} ${ok.length === 1 ? 'Deck' : 'Decks'}, ${ok.reduce((a, d) => a + d.notes, 0).toLocaleString('de-DE')} Karten${tpl.length ? ', ' + (tpl.length === ok.length ? '' : tpl.length + ' davon ') + 'als Stilvorlage' : ''})` : '';
+  const save = $('#lib-save'), all = ok.length && tpl.length === ok.length;
+  save.hidden = !ok.length;
+  save.disabled = all && $('#opt-libstyle').checked;
+  save.textContent = save.disabled ? 'Als Stilvorlage gespeichert ✓' : tpl.length && !all ? `Neue Decks zur Stilvorlage hinzufügen (${ok.length - tpl.length})` : 'Als Stilvorlage speichern';
   fill($('#lib-list'), ...state.library.map(d => el('li', { class: 'file' },
     el('span', { class: 'file-name', text: d.deck || d.file }),
-    el('span', { class: 'file-meta' + (d.status === 'error' ? ' err' : ''), text: d.status === 'lädt' ? 'wird gelesen …' : d.status === 'error' ? d.error : `${karten(d.notes)} · Vorderseite ~${d.stats.front} Zeichen, Rückseite ~${d.stats.back} Zeichen · ${Math.round(d.stats.list * 100)} % Listen` + (d.types ? ' · Notiztypen erkannt' : '') }),
-    d.status === 'lädt' ? null : el('button', { type: 'button', class: 'btn small ghost', 'aria-label': (d.deck || d.file) + ' entfernen', onclick: () => { state.library = state.library.filter(x => x !== d); knownChanged(); saveLibrary(); renderLibrary(); renderDeck(true); } }, 'Entfernen'))));
+    el('span', { class: 'file-meta' + (d.status === 'error' ? ' err' : ''), text: d.status === 'lädt' ? 'wird gelesen …' : d.status === 'error' ? d.error : `${karten(d.notes)} · Vorderseite ~${d.stats.front} Zeichen, Rückseite ~${d.stats.back} Zeichen · ${Math.round(d.stats.list * 100)} % Listen` + (d.types ? ' · Notiztypen erkannt' : '') + (d.template ? ' · Stilvorlage' : '') }),
+    d.status === 'lädt' ? null : el('button', { type: 'button', class: 'btn small ghost', 'aria-label': (d.deck || d.file) + ' entfernen', onclick: () => { state.library = state.library.filter(x => x !== d); knownChanged(); saveLibrary(); libMsg(''); renderLibrary(); renderDeck(true); } }, 'Entfernen'))));
   $('#opt-libstyle').disabled = !ok.length;
   renderExportTypes();
 }
-// Decks of the same course first (by words of the course name), else all decks.
+// The decks saved as style template (else all decks); of these, decks of the same course first (by words of the
+// course name). Decks without cards of the user's own (only Lernstudio cards) give no style.
 function styleDecks() {
-  const ok = state.library.filter(d => d.status === 'ok');
+  const all = state.library.filter(d => d.status === 'ok' && (d.stats.own == null ? d.notes : d.stats.own) > 0);
+  const ok = all.some(d => d.template) ? all.filter(d => d.template) : all;
   const words = ($('#course').value || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length > 3);
   const score = d => words.filter(w => d.deck.toLowerCase().includes(w)).length;
   const best = Math.max(0, ...ok.map(score));
@@ -1645,8 +1684,9 @@ function libraryStyleBlock(o) {
   if (!o.libStyle) return '';
   const decks = styleDecks();
   if (!decks.length) return '';
-  const n = decks.reduce((a, d) => a + d.notes, 0);
-  const avg = k => decks.reduce((a, d) => a + d.stats[k] * d.notes, 0) / n;
+  const w = d => d.stats.own == null ? d.notes : d.stats.own;
+  const n = decks.reduce((a, d) => a + w(d), 0);
+  const avg = k => decks.reduce((a, d) => a + d.stats[k] * w(d), 0) / n;
   const pct = k => Math.round(avg(k) * 100) + ' %';
   // A fixed, varied pick: lists, a cloze and a reverse card where the decks have them.
   const pool = decks.flatMap(d => d.examples);
@@ -4368,7 +4408,8 @@ function startFresh() {
   $('#start-quiz').hidden = true;
   setCardBusy(false); setQuizBusy(false);
   renderFiles(); updateImageOptions(); renderSlideRangeHint(); paintCardProgress(); paintQuizProgress(); renderDeck(); renderQuizResume(); showQuizView();
-  ['#gen-cards-msg', '#gen-quiz-msg'].forEach(id => { $(id).textContent = 'Alles geleert. Lade links das Material für das neue Deck.'; });
+  const tpl = state.library.some(d => d.status === 'ok');
+  ['#gen-cards-msg', '#gen-quiz-msg'].forEach(id => { $(id).textContent = 'Alles geleert' + (tpl ? '; deine Anki-Decks bleiben als Vorlage erhalten' : '') + '. Lade links das Material für das neue Deck.'; });
 }
 
 /* ---------- Tabs ---------- */
@@ -4461,6 +4502,18 @@ function bind() {
   ['dragleave', 'drop'].forEach(t => ldrop.addEventListener(t, e => { e.preventDefault(); ldrop.classList.remove('over'); }));
   ldrop.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length) addLibraryFiles(e.dataTransfer.files); });
   $('#opt-libdupes').addEventListener('change', () => { knownChanged(); renderDeck(true); });
+  $('#opt-libstyle').addEventListener('change', renderLibrary);
+  $('#lib-save').addEventListener('click', async () => {
+    const ok = state.library.filter(d => d.status === 'ok');
+    ok.forEach(d => { d.template = true; });
+    $('#opt-libstyle').checked = true; saveCardSettings();
+    renderLibrary();
+    if (!(await saveLibrary())) { libMsg(NOT_SAVED, true); return; }
+    // Asks the browser not to clear this storage when space runs low (it may decline; the decks are saved either way).
+    try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch {}
+    const own = styleDecks().reduce((a, d) => a + (d.stats.own == null ? d.notes : d.stats.own), 0);
+    libMsg(`Gespeichert: ${ok.length === 1 ? 'Dein Deck ist' : `Deine ${ok.length} Decks sind`} die Stilvorlage. Claude schreibt neue Karten im Stil von ${own.toLocaleString('de-DE')} eigenen Karten, auch nach „Neues Deck beginnen“ und beim nächsten Öffnen.`);
+  });
   $('#deck-name').addEventListener('input', renderExportHistory);
   $('#clear-deck').addEventListener('click', e => armConfirm(e.currentTarget, 'Deck wirklich verwerfen?', () => { state.cards = []; cardJobs = []; cardRun = null; saveCardRun(); paintCardProgress(); saveCards(); renderDeck(); renderCardResume(); }));
   let pendingExport = null;
@@ -4537,11 +4590,21 @@ function bind() {
   window.addEventListener('pagehide', saveProgress);
   document.addEventListener('visibilitychange', () => { if (document.hidden) saveProgress(); });
 }
+// The decks from IndexedDB; older versions kept them in localStorage, from where they move over.
+async function loadLibrary() {
+  try {
+    const saved = await bigStore.get('library');
+    if (Array.isArray(saved)) state.library = saved.concat(state.library.filter(d => !saved.some(x => x.id === d.id)));
+    else if (state.library.length) await saveLibrary();
+  } catch { return; }
+  knownChanged(); renderLibrary(); renderDeck(true);
+}
 function init() {
   restoreSettings();
   bind();
   renderFiles();
   renderLibrary();
+  loadLibrary();
   renderDeck();
   renderSlideRangeHint();
   renderExamPanel();
