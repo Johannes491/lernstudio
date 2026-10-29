@@ -142,8 +142,8 @@ const usage = { cost: 0 };
 // on rate limits and overloads by itself (new accounts start with lower limits).
 const POOL = 8;
 const RUNNING = POOL;
-// Card writing is extraction, so little thinking is needed; checks and distractors get a bit more.
-const EFFORT = { cards: 'low', coverage: 'medium', quiz: 'medium', grade: 'low', select: 'medium' };
+// Card writing is mostly extraction, checks and distractors need a bit more thought; "Gründlich" gets one step more.
+const EFFORT = { cards: 'low', cardsCareful: 'medium', coverage: 'medium', coverageCareful: 'high', quiz: 'medium', grade: 'low', select: 'medium' };
 const FATAL = new Set(['no_key', 'auth', 'permission', 'spend_cap', 'billing', 'model']);
 function errText(e) {
   if (e instanceof Error) return e.message;

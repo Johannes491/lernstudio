@@ -387,7 +387,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
             </label>
           </div>
           <label class="choice"><input type="checkbox" id="opt-images"><span>Folienbilder an Claude mitsenden<small id="opt-images-hint">Liest auch Diagramme, Abbildungen und gescannte Folien. Nur bei PDF.</small></span></label>
-          <label class="choice"><input type="checkbox" id="opt-coverage" checked><span>Abdeckung prüfen und Lücken füllen<small>Ein zweiter Durchgang vergleicht Folie für Folie mit den Karten und ergänzt Fehlendes.</small></span></label>
+          <label class="choice"><input type="checkbox" id="opt-coverage" checked><span>Karten prüfen und Lücken füllen<small>Ein zweiter Durchgang vergleicht Folie für Folie mit den Karten, auch Grafikfolien als Bild, ergänzt Fehlendes und korrigiert falsche Angaben.</small></span></label>
           <label class="choice"><input type="checkbox" id="opt-formula" checked><span>Formeln und Rechenwege<small>Jede Formel als eigene Karte, dazu Rechenbeispiele mit Lösungsweg.</small></span></label>
           <details id="lib-box" class="method">
             <summary>Meine Anki-Decks: Stil und Dubletten <span id="lib-count" class="hint"></span></summary>
@@ -415,7 +415,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
           <ol id="card-progress" class="progress" aria-live="polite"></ol>
           <details class="method">
             <summary>Wie die Karten entstehen</summary>
-            <p>Das Material wird in gleich große Abschnitte geteilt, die parallel bearbeitet werden. Kopfzeilen, die auf jeder Folie stehen, werden vorher entfernt. Für jeden Abschnitt schreibt Claude Karten im Stil deiner bisherigen Decks: kurze Frage vorne, Stichpunkte hinten, Fachbegriffe fett, Anzahl bei Aufzählungen, Folie als Quelle. Dabei gilt das Minimum-Information-Prinzip (eine Karte, ein Gedanke), und Claude nutzt nur das Material. Die Karten erscheinen, sobald sie geschrieben sind. Danach prüft ein zweiter Durchgang Folie für Folie, was noch fehlt und welche Karten nur wiederholen, was schon auf anderen steht. Am Ende entfernt das Lernstudio Karten, deren Inhalt fast vollständig schon auf einer anderen Karte steht, etwa einen Lückentext zu einer schon gestellten Frage.</p>
+            <p>Das Material wird in gleich große Abschnitte geteilt, die parallel bearbeitet werden. Kopfzeilen, die auf jeder Folie stehen, werden vorher entfernt. Für jeden Abschnitt schreibt Claude Karten im Stil deiner bisherigen Decks: kurze Frage vorne, Stichpunkte hinten, Fachbegriffe fett, Anzahl bei Aufzählungen, Folie als Quelle. Dabei gilt das Minimum-Information-Prinzip (eine Karte, ein Gedanke), und Claude nutzt nur das Material. Die Karten erscheinen, sobald sie geschrieben sind. Danach prüft ein zweiter Durchgang Folie für Folie, was noch fehlt, ob Zahlen, Namen und Zuordnungen stimmen und welche Karten nur wiederholen, was schon auf anderen steht. Eine automatische Vorprüfung gibt ihm Verdachtsfälle mit (Folien ohne Karte, Begriffe ohne Karte, Zahlen, die nicht im Folientext stehen, Aufzählungen mit falscher Anzahl), Grafikfolien sieht er als Bild. Korrigierte Karten sind markiert; der alte Text steht im Hinweis der Markierung. Am Ende entfernt das Lernstudio Karten, deren Inhalt fast vollständig schon auf einer anderen Karte steht, etwa einen Lückentext zu einer schon gestellten Frage.</p>
           </details>
         </div>
 
@@ -709,8 +709,8 @@ const usage = { cost: 0 };
 // on rate limits and overloads by itself (new accounts start with lower limits).
 const POOL = 8;
 const RUNNING = POOL;
-// Card writing is extraction, so little thinking is needed; checks and distractors get a bit more.
-const EFFORT = { cards: 'low', coverage: 'medium', quiz: 'medium', grade: 'low', select: 'medium' };
+// Card writing is mostly extraction, checks and distractors need a bit more thought; "Gründlich" gets one step more.
+const EFFORT = { cards: 'low', cardsCareful: 'medium', coverage: 'medium', coverageCareful: 'high', quiz: 'medium', grade: 'low', select: 'medium' };
 const FATAL = new Set(['no_key', 'auth', 'permission', 'spend_cap', 'billing', 'model']);
 function errText(e) {
   if (e instanceof Error) return e.message;
@@ -1235,6 +1235,14 @@ function unitText(u) {
   const b = boilerplate(u.fileId);
   return b.size ? u.text.split('\n').filter(l => !b.has(l.trim())).join('\n').trim() : u.text;
 }
+// Slide text without links and literature references (also links broken over several lines: a line without spaces
+// holding "/" or "_", or a file name). A slide whose text is only a title and a source link shows its content as a
+// picture (chart, table, screenshot): it goes to Claude as an image.
+const REF_LINE = /https?:|www\.|doi\.org|\(\d{4}[a-z]?\)\.|\bpp?\.\s*\d|\(S\.\s*\d+\)|\(Eds?\.\)|University Press|^\S*[/_]\S*$|\.(?:pdf|html?|php|aspx?)\b/i;
+// Slides that list literature or picture credits: no learning content.
+const NO_CONTENT_TITLE = /^\W*(literatur|quellen|bildverzeichnis|bildnachweis|abbildungsverzeichnis|references|zum weiterlesen|weiterführende)/i;
+const contentText = u => unitText(u).split('\n').filter(l => !REF_LINE.test(l)).join('\n').trim();
+const pictureSlide = u => contentText(u).length < 60;
 function resetMaterialCaches() {
   boilerCache.clear(); slideCache.clear(); claudeCache.clear(); boxCache.clear();
   slideUrls.forEach(p => p.then(u => u && URL.revokeObjectURL(u))); slideUrls.clear();
@@ -1666,6 +1674,10 @@ REGELN:
   · Lückentext- und Umkehrkarten zu Inhalten, die schon eine Frage-Karte abfragt, und umgekehrt;
   · Vergleichs-, Kritik- und Überblickskarten: nur der Unterschied, die Kritik oder die Oberbegriffe, nicht noch einmal die Erklärungen, die auf anderen Karten stehen;
   · Rückseiten und Lückentext-Zusätze: nur, was die Frage verlangt, keine Punkte, die eine andere Karte abfragt.
+- Sorgfalt: Zahlen, Jahreszahlen, Namen, Fachbegriffe und Zuordnungen (wer sagt was, was gehört zu welchem Modell) exakt wie im Material. Prüfe jede Karte, bevor du sie ausgibst: Beantwortet die Rückseite genau die Frage, stimmt die Anzahl in Klammern mit den Stichpunkten überein, fehlt kein Punkt einer Aufzählung der Folie?
+- Aufzählungen vollständig: Nennt eine Folie eine Liste, steht jeder Punkt auf einer Karte (bei mehr als 7 Punkten auf mehreren); keiner fällt weg.
+- Grafiken, Tabellen und Abbildungen (wo ein Folienbild beiliegt): mindestens eine Karte zu ihrer Kernaussage (Verlauf, Gipfel, Vergleich, die wichtigsten Werte), nicht zu jedem Einzelwert.
+- Links und Literaturangaben sind kein Lernstoff. Autor:innen und Jahr einer Studie oder Theorie fragst du ab, wenn die Folie sie als Inhalt nennt.
 - Ausgelesener Folientext ist bei Formeln oft unvollständig: Klammern, Brüche, Wurzeln, Exponenten und Summenzeichen fehlen (z. B. „VAR X = E X − E X 2“ statt VAR(X) = E((X − E(X))<sup>2</sup>)). Bei manchen PDFs ist er Zeichensalat. Rekonstruiere Formeln in der üblichen Notation des Fachs und prüfe sie an den Rechenbeispielen der Folien. Wo ein Folienbild beiliegt, ist es maßgeblich. Unlesbare Stellen ohne Bild lässt du weg, statt zu raten.
 - "slide": die Nummer N aus der Überschrift „=== Datei · Folie N ===“ (bzw. Seite/Abschnitt N), aus der die Karte stammt.
 - "topic": Unterthema in 1–4 Wörtern; für alle Karten zum selben Thema gleich geschrieben.
@@ -1953,10 +1965,65 @@ function renderExportHistory() {
   fill(box, mine.length ? el('details', { class: 'method' }, el('summary', { text: `Bisherige Exporte${course ? ' für ' + course : ''} (${mine.length})` }),
     el('ul', {}, ...mine.map(h => el('li', { text: `${h.date}: ${h.deck} · ${karten(h.count)}` })))) : null);
 }
-function coveragePrompt(group, cardsInGroup, o) {
+// The review's homework, found without Claude (suspicions, not verdicts):
+// - text slides whose words (from 4 letters, crudely stemmed) are mostly on no card of the file (not for compact decks);
+// - numbers on a card that its slide and the neighbours do not have in their text: read from a chart, misread or made
+//   up ("70" counts for "1970er"; calculation cards have numbers of their own);
+// - an enumeration question whose count "(4)" differs from the bullet points of its answer.
+const stemOf = w => w.length > 5 ? w.replace(/(innen|ungen|ung|en|er|es|em|e|n|s)$/, '') : w;
+const termsOf = text => { const m = new Map(); tokensOf(normFront(text)).forEach(w => { if (w.length >= 4 || /\d/.test(w)) { const k = stemOf(w); if (!m.has(k)) m.set(k, w); } }); return m; };
+const numbersIn = text => (String(text).match(/\d+(?:[.,]\d+)*/g) || []).map(x => x.replace(/\.(?=\d{3}(?!\d))/g, '').replace(',', '.')).filter(x => x.length > 1);
+// The count at the end of an enumeration question, "(4)"; a year like "(1993)" is none.
+const COUNT_END = /\((\d{1,2})\)\s*\??\s*$/;
+// Numbers on a card that its slide and the neighbours do not have in their text ("70" counts for "1970er");
+// calculation cards have numbers of their own.
+function oddNumbers(c, units) {
+  if (c.type === 'occlusion' || c.kind === 'calc') return [];
+  const have = numbersIn(units.filter(x => Math.abs(x.num - c.slide) <= 1).map(unitText).join('\n'));
+  const text = stripHtml(String(c.front).replace(/\{\{c\d+::(.*?)(::[^}]*)?\}\}/g, '$1').replace(COUNT_END, '') + ' ' + (c.back || ''));
+  return [...new Set(numbersIn(text))].filter(n => !have.some(h => h === n || h.endsWith(n)));
+}
+function listItems(back) {
+  const d = new DOMParser().parseFromString('<div>' + back + '</div>', 'text/html').body.firstChild;
+  const lists = d.querySelectorAll(':scope > ul, :scope > ol');
+  return lists.length === 1 ? lists[0].querySelectorAll(':scope > li').length : 0;
+}
+function reviewFindings(group, cardsInGroup, o, seen) {
+  const out = [];
+  const units = state.units.filter(u => u.fileId === group.fileId);
+  if (!compact(o)) {
+    const onCards = new Set(state.cards.filter(c => c.fileId === group.fileId && !c.draft).flatMap(c => [...termsOf(c.front + ' ' + (c.back || '')).keys()]));
+    for (const u of group.units) {
+      const text = contentText(u), t = termsOf(text);
+      if (t.size < 10 || NO_CONTENT_TITLE.test(text)) continue;
+      const miss = [...t.keys()].filter(k => !onCards.has(k));
+      if (miss.length / t.size > 0.35) out.push(`Folie ${u.num}: diese Begriffe der Folie stehen auf keiner Karte: ${miss.map(k => t.get(k)).sort((a, b) => b.length - a.length).slice(0, 8).join(', ')}`);
+    }
+  }
+  for (const c of cardsInGroup) {
+    if (c.type === 'occlusion') continue;
+    const u = units.find(x => x.num === c.slide), odd = oddNumbers(c, units);
+    // On a picture slide without its picture nothing can be checked.
+    if (odd.length && u && (seen.includes(u.num) || !pictureSlide(u))) out.push(`${c.id} (Folie ${c.slide}): ${odd.length === 1 ? 'die Zahl ' + odd[0] + ' steht' : 'die Zahlen ' + odd.join(', ') + ' stehen'} nicht im Folientext${seen.includes(c.slide) ? ' – am Folienbild prüfen' : ' (vielleicht aus einer Grafik)'}`);
+    const want = (stripHtml(c.front).match(COUNT_END) || [])[1], got = want && listItems(c.back || '');
+    if (got && got !== +want) out.push(`${c.id} (Folie ${c.slide}): die Frage nennt (${want}), die Antwort hat ${got} Stichpunkte`);
+  }
+  return out;
+}
+// Slides the review should see: picture slides and slides with unreliable text (those without a card first), then
+// slides whose cards have numbers that are not in the text (often read from a chart).
+function reviewSlides(group, cardsInGroup) {
+  const units = state.units.filter(u => u.fileId === group.fileId);
+  const cand = group.units.filter(u => pictureSlide(u) || u.check);
+  const bare = u => !cardsInGroup.some(c => c.slide === u.num);
+  const odd = group.units.filter(u => !cand.includes(u) && cardsInGroup.some(c => c.slide === u.num && oddNumbers(c, units).length));
+  return cand.filter(bare).concat(cand.filter(u => !bare(u)), odd.slice(0, 8)).filter(u => pdfDocs.has(u.fileId)).slice(0, caps.imageMax || 0);
+}
+function coveragePrompt(group, cardsInGroup, o, review = {}) {
+  const seen = review.seen || [], findings = review.findings || [];
   const without = compact(o) ? [] : group.units.filter(u => unitText(u).length >= 80 && !cardsInGroup.some(c => c.slide === u.num)).map(u => u.num);
-  const list = cardsInGroup.map(c => `${c.id} | ${c.slide || '-'} | ${stripHtml(c.front).slice(0, 140)} → ${c.type === 'occlusion' ? 'Bildverdeckung: ' + c.occ.rects.map(r => r.label).filter(Boolean).join(', ').slice(0, 160) : stripHtml(c.back).slice(0, 180)}`).join('\n');
-  return `Du prüfst ein Anki-Deck auf Vollständigkeit für eine Klausur in einem Psychologie-Studium (Ziel: Note 1,0).
+  const list = cardsInGroup.map(c => `${c.id} | ${c.slide || '-'} | ${stripHtml(c.front).slice(0, 300)} → ${c.type === 'occlusion' ? 'Bildverdeckung: ' + c.occ.rects.map(r => r.label).filter(Boolean).join(', ').slice(0, 160) : stripHtml(c.back).slice(0, 700)}`).join('\n');
+  return `Du prüfst ein Anki-Deck auf Vollständigkeit und Richtigkeit für eine Klausur in einem Psychologie-Studium (Ziel: Note 1,0).
 
 ${courseLine()}
 Material: ${chunkLabel(group)}
@@ -1964,6 +2031,7 @@ Material: ${chunkLabel(group)}
 AUFGABE:
 1. Gehe das Material Folie für Folie durch und vergleiche es mit der Kartenliste. ${compact(o) ? `Das Deck ist bewusst ${o.density === 'sehrkompakt' ? 'sehr ' : ''}kompakt (${densityRule(o)}). Ergänze nur zentrale Inhalte, die in diesem Umfang fehlen.` : 'Erstelle neue Karten für jeden prüfungsrelevanten Inhalt, der noch NICHT abgedeckt ist.'} Erstelle keine Karten zu Inhalten, die schon abgedeckt sind, auch nicht anders formuliert.
 2. Nenne in "duplicates" die IDs von Karten, deren Inhalt ganz oder größtenteils schon auf einer anderen Karte der Liste steht: wörtliche oder umformulierte Wiederholungen, Lückentext- oder Umkehrkarten zu schon abgefragten Inhalten, Vergleichs- oder Zusammenfassungskarten, die nur Einzelkarten wiederholen. Jeweils nur die Karte, die weniger Neues bringt. Karten mit „Bildverdeckung:“ fragen die Lage im Diagramm ab und sind nie Dubletten.
+3. Prüfe jede Karte der Liste sorgfältig gegen das Material: Zahlen, Jahreszahlen, Namen, Fachbegriffe, Zuordnungen (wer sagt was, was gehört zu welchem Modell), Vollständigkeit von Aufzählungen und die Anzahl in Klammern. Ist eine Karte sachlich falsch, unvollständig oder missverständlich, gib eine korrigierte Fassung aus. Korrigiere nur Fehler gegenüber dem Material, nicht den Stil; fehlerfreie Karten gibst du nicht aus. Bildverdeckungskarten korrigierst du nicht. Zahlen, die nicht im Folientext stehen, stammen oft aus Grafiken: Prüfe sie am Folienbild; ohne Bild änderst du sie nur, wenn das Material ihnen widerspricht.
 
 ${COVER_RULES}
 
@@ -1979,14 +2047,15 @@ ${formulaRules(o)}REGELN:
 
 ANFORDERUNGEN DES NUTZERS (haben Vorrang vor allen anderen Regeln):
 ${o.req || '(keine)'}
-${o.filter && o.filter.pick ? 'Die Folienauswahl aus diesen Anforderungen ist schon angewendet: Jede Folie im Material gehört dazu.\n' : ''}${without.length ? `\nFOLIEN NOCH OHNE KARTE (prüfe sie zuerst und ergänze, was dort prüfungsrelevant ist): ${without.join(', ')}\n` : ''}
-KARTENLISTE (ID | Folie | Vorderseite → Rückseite, gekürzt):
+${o.filter && o.filter.pick ? 'Die Folienauswahl aus diesen Anforderungen ist schon angewendet: Jede Folie im Material gehört dazu.\n' : ''}${without.length ? `\nFOLIEN NOCH OHNE KARTE (prüfe sie zuerst und ergänze, was dort prüfungsrelevant ist): ${without.join(', ')}\n` : ''}${findings.length ? `\nHINWEISE DER AUTOMATISCHEN VORPRÜFUNG (Verdachtsfälle, prüfe sie zuerst; nicht jeder ist ein Fehler):\n${findings.map(f => '- ' + f).join('\n')}\n` : ''}${seen.length ? `\nZu ${seen.length === 1 ? 'Folie' : 'den Folien'} ${seen.join(', ')} ist je ein Bild angehängt (in dieser Reihenfolge): Grafiken, Tabellen und Abbildungen, deren Inhalt im ausgelesenen Text fehlt. Maßgeblich ist das Bild.\n` : ''}
+KARTENLISTE (ID | Folie | Vorderseite → Rückseite, als Text):
 ${list || '(noch keine Karten)'}
 
 AUSGABE: JSON Lines, ohne Codeblock, ohne weiteren Text und ohne Zeilenumbruch innerhalb eines Objekts:
 - jede neue Karte als eigenes JSON-Objekt in einer eigenen Zeile: {"type":"basic","front":"…","back":"<ul><li>…</li></ul>","slide":12,"topic":"…"}
+- jede Korrektur als eigene Zeile mit der vollständigen neuen Fassung, gleicher Kartentyp: {"fix":"k1a","front":"…","back":"<ul><li>…</li></ul>"}
 - ganz am Ende genau eine Zeile mit den Dubletten: {"duplicates":["k1a"]} (leere Liste, wenn es keine gibt)
-Fehlt nichts, besteht die Antwort nur aus der Dubletten-Zeile.
+Fehlt nichts und ist nichts falsch, besteht die Antwort nur aus der Dubletten-Zeile.
 
 MATERIAL:
 ${materialBlock(group.units)}`;
@@ -2115,9 +2184,10 @@ async function chunkImages(chunk) {
   const blobs = await Promise.all(chunk.units.map(u => claudeSlide(u.fileId, u.num)));
   return blobs.every(Boolean) ? blobs : null;
 }
-// Without "Folienbilder mitsenden", Claude still gets the slides whose text cannot be trusted (formulas, letter salad).
+// Without "Folienbilder mitsenden", Claude still gets the slides whose text cannot be trusted (formulas, letter salad)
+// and the picture slides.
 async function checkImages(chunk) {
-  const pick = chunk.units.filter(u => (u.check || unitText(u).length < 40) && pdfDocs.has(u.fileId)).slice(0, caps.imageMax || 0);
+  const pick = chunk.units.filter(u => (u.check || pictureSlide(u)) && pdfDocs.has(u.fileId)).slice(0, caps.imageMax || 0);
   const blobs = await Promise.all(pick.map(u => claudeSlide(u.fileId, u.num)));
   const ok = pick.map((u, i) => [u.num, blobs[i]]).filter(([, b]) => b);
   return ok.length ? { images: ok.map(([, b]) => b), nums: ok.map(([n]) => n) } : null;
@@ -2137,7 +2207,7 @@ async function runCardJob(job, total, o) {
     const some = o.images ? null : await checkImages(job.chunk);
     const images = o.images ? await chunkImages(job.chunk) : some && some.images;
     const res = await streamItems(cardPrompt(job.chunk, job.idx, total, o, o.images ? !!images : some ? some.nums : false), {
-      tier: o.tier, effort: EFFORT.cards, signal: cardCtl.signal, images,
+      tier: o.tier, effort: o.tier === 'complex' ? EFFORT.cardsCareful : EFFORT.cards, signal: cardCtl.signal, images,
       onItem: r => {
         if (r.skip) { job.skip = String(r.reason || 'laut deinen Anforderungen').slice(0, 120); return; }
         if (!cardJobs.includes(job)) return;
@@ -2254,7 +2324,7 @@ async function continueCards() {
   // instead of after the last section.
   if (o.coverage && !cardRun.cov && cardJobs.every(j => j.kind !== 'gen' || j.chunk)) {
     const t = Date.now();
-    cardRun.cov = coverageGroups(cardJobs.filter(j => j.kind === 'gen')).map((g, i) => ({ key: 'c' + i + '-' + t, label: 'Abdeckung prüfen · ' + chunkLabel(g), refs: g.units.map(unitRef), deps: g.deps, done: false }));
+    cardRun.cov = coverageGroups(cardJobs.filter(j => j.kind === 'gen')).map((g, i) => ({ key: 'c' + i + '-' + t, label: 'Prüfen und ergänzen · ' + chunkLabel(g), refs: g.units.map(unitRef), deps: g.deps, done: false }));
     saveCardRun();
   }
   const cov = o.coverage && cardRun.cov ? cardRun.cov.map(j => ({ kind: 'cov', key: j.key, group: j.done ? null : chunkFromRefs(j.refs), deps: j.deps || [], label: j.label, status: j.done ? 'fertig' : 'wartet', done: j.doneText || '', opts: o })) : [];
@@ -2272,8 +2342,10 @@ async function continueCards() {
   // Before removing duplicates: a slide whose card repeated another one is covered.
   const bare = cardCtl.signal.aborted || failed || compact(o) ? [] : state.units.filter(u => inFilter(u, o.filter) && unitText(u).length >= 80 && !state.cards.some(c => c.fileId === u.fileId && c.slide === u.num));
   const removed = cardCtl.signal.aborted ? 0 : dropDuplicates();
+  const fixed = state.cards.filter(c => c.fixed >= started).length;
   const secs = Math.round((Date.now() - started) / 1000);
   msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${karten(state.cards.length)} in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}${costNote(cost0)}.`;
+  if (fixed) msg.textContent += ` ${fixed} ${fixed === 1 ? 'Karte' : 'Karten'} bei der Prüfung korrigiert (markiert).`;
   if (removed) msg.textContent += ` ${removed} ${removed === 1 ? 'Karte' : 'Karten'} mit doppeltem Inhalt entfernt.`;
   if (bare.length) msg.textContent += ` Ohne Karte geblieben: ${bare.length === 1 ? 'Folie' : 'Folien'} ${compactNums(bare.map(u => u.num))} (im Raster rot). Prüfe sie mit „Lücken suchen“ oder per Klick auf die Folie.`;
 }
@@ -2288,13 +2360,13 @@ async function runCoverage() {
   cardJobs = cardJobs.filter(j => j.kind !== 'cov');
   const groups = makeChunks(usableUnits(false).filter(u => inFilter(u, o.filter)), 16000, 30, true);
   const t = Date.now();
-  const jobs = groups.map((g, i) => ({ kind: 'cov', key: 'c' + i + '-' + t, group: g, deps: [], label: 'Abdeckung prüfen · ' + chunkLabel(g), status: 'wartet', opts: o }));
+  const jobs = groups.map((g, i) => ({ kind: 'cov', key: 'c' + i + '-' + t, group: g, deps: [], label: 'Prüfen und ergänzen · ' + chunkLabel(g), status: 'wartet', opts: o }));
   cardJobs.push(...jobs); paintCardProgress();
   await runPool(jobs, POOL, cardCtl.signal, job => runCoverageJob(job, o));
   setCardBusy(false);
   const removed = cardCtl.signal.aborted ? 0 : dropDuplicates();
-  const added = state.cards.filter(c => c.added).length;
-  $('#gen-cards-msg').textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : `Abdeckung geprüft. ${added} ergänzte Karten im Deck.` + (removed ? ` ${removed} ${removed === 1 ? 'Karte' : 'Karten'} mit doppeltem Inhalt entfernt.` : '');
+  const added = state.cards.filter(c => c.added).length, fixed = state.cards.filter(c => c.fixed >= t).length;
+  $('#gen-cards-msg').textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : `Geprüft. ${added} ergänzte Karten im Deck.` + (fixed ? ` ${fixed} ${fixed === 1 ? 'Karte' : 'Karten'} korrigiert (markiert).` : '') + (removed ? ` ${removed} ${removed === 1 ? 'Karte' : 'Karten'} mit doppeltem Inhalt entfernt.` : '');
 }
 async function runCoverageJob(job, opts) {
   const o = Object.assign({}, opts, { images: false });
@@ -2307,12 +2379,28 @@ async function runCoverageJob(job, opts) {
   // Sections the instructions excluded have no cards; their check would only bring back what was left out on purpose.
   if (!inGroup.length) { job.status = 'fertig'; job.done = 'übersprungen'; saveCardRun(); paintCardProgress(); return; }
   const ids = new Set(inGroup.map(c => c.id));
-  let dupes = 0;
+  let dupes = 0, fixed = 0;
   try {
-    await streamItems(coveragePrompt(g, inGroup, o), {
-      tier: o.tier, effort: EFFORT.coverage, signal: cardCtl.signal,
+    const look = reviewSlides(g, inGroup);
+    const blobs = await Promise.all(look.map(u => claudeSlide(u.fileId, u.num)));
+    const seen = look.map(u => u.num).filter((n, i) => blobs[i]), images = blobs.filter(Boolean);
+    await streamItems(coveragePrompt(g, inGroup, o, { seen, findings: reviewFindings(g, inGroup, o, seen) }), {
+      tier: o.tier, effort: o.tier === 'complex' ? EFFORT.coverageCareful : EFFORT.coverage, signal: cardCtl.signal, images: images.length ? images : undefined,
       onItem: r => {
         if (!cardJobs.includes(job)) return;
+        if (r.fix != null) {
+          // A corrected version replaces the card's text; id, GUID (Anki), slide and topic stay. It must stay valid and of
+          // the same type; the old text is kept for the "korrigiert" mark.
+          const c = ids.has(String(r.fix)) && state.cards.find(x => x.id === String(r.fix));
+          if (!c || c.type === 'occlusion') return;
+          const n = normalizeCards([{ type: c.type, front: r.front || c.front, back: r.back != null ? r.back : c.back, slide: c.slide, topic: c.topic, kind: c.kind }], g, o, false)[0];
+          if (!n || n.type !== c.type || (n.front === c.front && n.back === c.back)) return;
+          if (!c.before) c.before = { front: c.front, back: c.back };
+          c.front = n.front; c.back = n.back; c.fixed = Date.now(); fixed++;
+          job.live = `+${job.n} ergänzt, ${fixed} korrigiert`;
+          scheduleDeckRender();
+          return;
+        }
         if (Array.isArray(r.duplicates)) {
           r.duplicates.map(String).forEach(id => { if (ids.has(id)) { const c = state.cards.find(x => x.id === id); if (c && !c.dupe && c.type !== 'occlusion') { c.dupe = true; dupes++; } } });
         } else {
@@ -2325,7 +2413,7 @@ async function runCoverageJob(job, opts) {
       },
     });
     job.status = 'fertig';
-    job.done = `+${job.n} ergänzt` + (dupes ? ` · ${dupes} Dubletten` : '');
+    job.done = `+${job.n} ergänzt` + (fixed ? ` · ${fixed} korrigiert` : '') + (dupes ? ` · ${dupes} Dubletten` : '');
   } catch (e) {
     if (e && e.code === 'refused') state.cards = state.cards.filter(c => c.job !== job.key);
     if (e && e.code === 'cancelled') job.status = 'abgebrochen';
@@ -2435,6 +2523,7 @@ function cardView(c) {
       c.kind ? el('span', { class: 'chip', text: c.kind === 'formula' ? 'Formel' : 'Rechnung' }) : null,
       c.added ? el('span', { class: 'chip new', text: 'ergänzt' }) : null,
       c.dupe ? el('span', { class: 'chip warn', text: 'mögliche Dublette' }) : null,
+      c.fixed && c.before ? el('span', { class: 'chip new', title: 'Vorher: ' + stripHtml(c.before.front) + ' → ' + stripHtml(c.before.back), text: 'korrigiert' }) : null,
       c.known ? el('span', { class: 'chip warn', title: `${c.known.src}: ${c.known.f}`, text: c.known.exp ? 'schon exportiert' : 'schon in deinem Deck' }) : null,
       c.topic ? el('span', { class: 'topic', text: c.topic }) : null),
     el('div', { class: 'icard-front', html: front }),
@@ -2466,7 +2555,7 @@ function cardEditor(c) {
         if (t === 'cloze' && !hasCloze(f)) { err.textContent = 'Ein Lückentext braucht mindestens eine Lücke wie {{c1::Begriff}}.'; return; }
         if (t !== 'cloze' && !stripHtml(b)) { err.textContent = 'Die Rückseite ist leer.'; return; }
         Object.assign(c, { type: t, front: f, back: b, slide: parseInt(slide.value, 10) || null, topic: topic.value.trim() });
-        delete c.dupe; delete c.draft; view.editing = null; sortCards(); saveCards(); renderDeck();
+        delete c.dupe; delete c.draft; delete c.fixed; delete c.before; view.editing = null; sortCards(); saveCards(); renderDeck();
       } }, 'Speichern'),
       el('button', { type: 'button', class: 'btn small', onclick: () => {
         if (c.draft) state.cards = state.cards.filter(x => x.id !== c.id);
@@ -2817,7 +2906,7 @@ function occlusionEditor(c) {
         Object.assign(c, { type: 'occlusion', front: escapeHtml(head.value.trim()) || 'Was gehört an die markierte Stelle?', back: sanitize(extra.value),
           fileId: f ? f.id : c.fileId, fileName: f ? f.name : c.fileName, slide: offline ? c.slide : parseInt(slideIn.value, 10), topic: topic.value.trim(),
           occ: { mode: modeSel.value, rects: rects.map(r => ({ id: r.id, x: r4(r.x), y: r4(r.y), w: r4(r.w), h: r4(r.h), label: String(r.label || '').trim() })) } });
-        delete c.dupe; delete c.draft; view.editing = null; sortCards(); saveCards(); renderDeck();
+        delete c.dupe; delete c.draft; delete c.fixed; delete c.before; view.editing = null; sortCards(); saveCards(); renderDeck();
       } }, 'Speichern'),
       el('button', { type: 'button', class: 'btn small', onclick: () => {
         if (c.draft) state.cards = state.cards.filter(x => x.id !== c.id);
