@@ -360,10 +360,10 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
           <div class="grid2">
             <fieldset>
               <legend>Umfang</legend>
-              <label class="choice"><input type="radio" name="density" value="sehrkompakt"><span>Sehr kompakt<small>Nur das Wichtigste, etwa 1 Karte pro 2–3 Folien</small></span></label>
-              <label class="choice"><input type="radio" name="density" value="kompakt"><span>Kompakt<small>Kernkonzepte, etwa 1 Karte pro Folie</small></span></label>
-              <label class="choice"><input type="radio" name="density" value="vollstaendig" checked><span>Vollständig<small>Jede prüfungsrelevante Aussage, 1–3 Karten pro Folie</small></span></label>
-              <label class="choice"><input type="radio" name="density" value="maximal"><span>Maximal<small>Zusätzlich Detail- und Verständnisfragen</small></span></label>
+              <label class="choice"><input type="radio" name="density" value="sehrkompakt"><span>Sehr kompakt<small>Nur das Allerwichtigste, etwa 1 Karte pro 4 Folien</small></span></label>
+              <label class="choice"><input type="radio" name="density" value="kompakt"><span>Kompakt<small>Die Kerninhalte, etwa 1 Karte pro 2 Folien – so dicht wie ein typisches selbst geschriebenes Deck</small></span></label>
+              <label class="choice"><input type="radio" name="density" value="vollstaendig" checked><span>Vollständig<small>Jede prüfungsrelevante Aussage, 1–2 Karten pro Folie</small></span></label>
+              <label class="choice"><input type="radio" name="density" value="maximal"><span>Maximal<small>Zusätzlich Detail- und Verständnisfragen, 2–4 Karten pro Folie</small></span></label>
             </fieldset>
             <fieldset>
               <legend>Kartentypen</legend>
@@ -1631,12 +1631,18 @@ function occlusionRule(o, withImages) {
   return `
 
 BILDVERDECKUNG:
-- Zeigt eine Folie ein beschriftetes Diagramm, Modell, Schema oder eine Abbildung, bei der die Lage der Beschriftungen prüfungsrelevant ist (z. B. Bestandteile eines Modells mit Pfeilen, Achsen und Kurven einer Grafik, Hirnareale), erstelle für diese Folie zusätzlich genau eine Karte {"type":"occlusion","front":"kurze Aufgabe, z. B. Beschrifte das Modell der KTT","labels":["…","…"],"slide":12,"topic":"…"}.
-- "labels": 3–12 Beschriftungen aus dem Diagramm, Zeichen für Zeichen wie im ausgelesenen Folientext (nicht übersetzen, kürzen oder umformulieren). Keine Folienüberschrift, keine ganzen Sätze, keine Quellenangaben.
+- Zeigt eine Folie ein beschriftetes Diagramm, Modell, Schema oder eine Abbildung, bei der die Lage der Beschriftungen prüfungsrelevant ist${compact(o) ? ' und das zu den Kerninhalten der Vorlesung gehört' : ''} (z. B. Bestandteile eines Modells mit Pfeilen, Achsen und Kurven einer Grafik, Hirnareale), erstelle für diese Folie zusätzlich genau eine Karte {"type":"occlusion","front":"kurze Aufgabe, z. B. Beschrifte das Modell der KTT","labels":["…","…"],"slide":12,"topic":"…"}.
+- "labels": ${o.density === 'sehrkompakt' ? '3–4 der wichtigsten' : o.density === 'kompakt' ? '3–6 der wichtigsten' : '3–12'} Beschriftungen aus dem Diagramm (jede wird eine eigene Anki-Karte), Zeichen für Zeichen wie im ausgelesenen Folientext (nicht übersetzen, kürzen oder umformulieren). Keine Folienüberschrift, keine ganzen Sätze, keine Quellenangaben.
 - Nicht für reine Text- oder Aufzählungsfolien und nicht für Diagramme, deren Beschriftungen nur im Bild und nicht im ausgelesenen Text stehen. Die übrigen Karten zur Folie schreibst du wie gewohnt.`;
 }
 function formulaRules(o) {
   if (!o.formula) return '';
+  if (compact(o)) return `FORMELN (im kompakten Umfang nur die zentralen):
+- Jede zentrale Formel bekommt eine Karte: "front" fragt nach der Formel, "back" enthält die Formel und die Bedeutung jedes Symbols. Setze "kind":"formula".
+- ${o.density === 'sehrkompakt' ? 'Keine Rechenkarten.' : 'Rechenkarten ("kind":"calc", Werte vorne, Rechenweg und Ergebnis hinten) nur für die ein, zwei wichtigsten Formeln; Rechenbeispiele aus dem Material übernehmen, sonst einfache eigene Zahlen exakt nachrechnen.'}
+- Schreibe Formeln als Text mit <sub> und <sup>, nicht als LaTeX.
+
+`;
   return `FORMELN UND RECHNUNGEN (Formeln müssen in der Klausur auswendig gekonnt und angewendet werden):
 - Jede Formel im Material bekommt eine eigene Karte: "front" fragt nach der Formel (z. B. „Wie lautet die Formel für …?“), "back" enthält die Formel und die Bedeutung jedes Symbols. Setze "kind":"formula".
 - Zu jeder Formel, die man anwenden kann, kommt eine Rechenkarte mit konkreten Zahlen: "front" gibt die Werte vor, "back" zeigt Rechenweg und Ergebnis. Übernimm Rechenbeispiele aus dem Material; fehlen sie, wähle einfache eigene Zahlen und rechne das Ergebnis exakt nach (nur hier sind eigene Zahlen erlaubt). Setze "kind":"calc".
@@ -1648,15 +1654,46 @@ function langRule(o) {
   return { auto: 'Schreibe in der Sprache der jeweiligen Folien: deutsche Folien → deutsche Karten, englische Folien → englische Karten.', de: 'Schreibe auf Deutsch. Stehen die Folien auf Englisch, ergänze den englischen Fachbegriff in Klammern.', en: 'Write the cards in English.' }[o.lang];
 }
 const compact = o => o.density === 'kompakt' || o.density === 'sehrkompakt';
-function densityRule(o) {
-  return { sehrkompakt: 'Sehr kompakt: nur das Wichtigste, also die zentralen Fachbegriffe, die Kernaussagen von Theorien und Modellen und die wichtigsten Befunde, etwa 1 Karte pro 2–3 inhaltlichen Folien. Details, Beispiele, Zahlen ohne zentrale Bedeutung und Nebenaspekte weglassen; Rückseiten kurz, höchstens 3 Stichpunkte. Diese Regel hat Vorrang vor der Liste der abzudeckenden Inhalte.', kompakt: 'Kompakt: nur die Kernkonzepte, etwa 1 Karte pro inhaltlicher Folie; Details zusammenfassen.', vollstaendig: 'Vollständig: jede prüfungsrelevante Aussage, etwa 1–3 Karten pro inhaltlicher Folie. Lieber eine Karte mehr als eine Lücke.', maximal: 'Maximal: zusätzlich Detailwissen und Verständnisfragen (Warum? Wie hängt … zusammen? Was folgt daraus?), etwa 2–4 Karten pro inhaltlicher Folie.' }[o.density];
+// The levels, in cards per slide with content. The user's own decks have about 22 cards per lecture (1 card per 2
+// slides): "Kompakt" matches them, "Sehr kompakt" is half of that. For both, the number is a budget per section that
+// the prompt states and runCardJob enforces; formula, calculation and image occlusion cards do not count.
+const PER_SLIDE = { sehrkompakt: [0.25, 0.25], kompakt: [0.5, 0.5], vollstaendig: [1, 2], maximal: [2, 4] };
+// Slides with content: text slides (without links and references, at least 60 characters) count fully, picture slides
+// half, literature and credit slides not at all.
+function contentWeight(units) {
+  return units.reduce((a, u) => { const t = contentText(u); return a + (NO_CONTENT_TITLE.test(t) ? 0 : t.length >= 60 ? 1 : 0.5); }, 0);
 }
+function cardRange(units, o) {
+  const w = contentWeight(units), [lo, hi] = PER_SLIDE[o.density] || PER_SLIDE.vollstaendig;
+  return w ? [Math.max(1, Math.round(w * lo)), Math.max(1, Math.round(w * hi))] : [0, 0];
+}
+const counted = c => c.type !== 'occlusion' && !c.kind;
+function densityRule(o) {
+  return { sehrkompakt: 'Sehr kompakt: nur das Allerwichtigste, etwa 1 Karte pro 4 inhaltlichen Folien: die zentralen Fachbegriffe, die Kernaussagen der wichtigsten Theorien und Modelle und die zentralen Befunde. Eine Karte bündelt zusammengehörige Punkte; Rückseiten höchstens 3 Stichpunkte. Details, Beispiele, Einzelzahlen, Nebenaspekte, Exkurse, Wiederholungs- und Quizfragen weglassen.', kompakt: 'Kompakt: die Kerninhalte, etwa 1 Karte pro 2 inhaltlichen Folien, so dicht wie ein gutes selbst geschriebenes Deck: zentrale Fachbegriffe und Definitionen, Kernaussagen von Theorien und Modellen, wichtige Studien mit Kernbefund. Eine Karte bündelt zusammengehörige Punkte (z. B. die Merkmale eines Konzepts, die Annahmen eines Modells), statt sie auf mehrere Karten zu verteilen; Rückseiten höchstens 5 Stichpunkte. Details, Beispiele, Einzelzahlen, Nebenaspekte und Exkurse weglassen.', vollstaendig: 'Vollständig: jede prüfungsrelevante Aussage, etwa 1–2 Karten pro inhaltlicher Folie. Zusammengehörige Punkte (eine Aufzählung, die Merkmale eines Konzepts) kommen auf eine Karte statt auf viele. Lieber eine Karte mehr als eine Lücke.', maximal: 'Maximal: zusätzlich Detailwissen und Verständnisfragen (Warum? Wie hängt … zusammen? Was folgt daraus?), etwa 2–4 Karten pro inhaltlicher Folie.' }[o.density];
+}
+// The size line of a section: a hard limit for the compact levels, a guide otherwise.
+function sizeRule(units, o) {
+  const [lo, hi] = cardRange(units, o), w = contentWeight(units);
+  if (!lo) return densityRule(o);
+  const slides = `${String(Math.round(w * 10) / 10).replace('.', ',')} inhaltliche Folien`;
+  return compact(o)
+    ? `${densityRule(o)} Für diesen Ausschnitt (etwa ${slides}): HÖCHSTENS ${lo} ${lo === 1 ? 'Karte' : 'Karten'}. Diese Zahl ist verbindlich und hat Vorrang vor allen Regeln zur Vollständigkeit; wähle die prüfungsrelevantesten Inhalte. Formel-, Rechen- und Bildverdeckungskarten zählen nicht mit.`
+    : `${densityRule(o)} Für diesen Ausschnitt (etwa ${slides}) also ungefähr ${lo}–${hi} Karten.`;
+}
+// What a compact deck covers, instead of the full list.
+const COMPACT_COVER = `WAS IN EIN KOMPAKTES DECK GEHÖRT:
+- zentrale Fachbegriffe und Definitionen
+- Kernaussagen von Theorien und Modellen (Grundannahme, wichtigste Komponenten)
+- die wichtigsten Studien mit ihrem Kernbefund
+- was die Folien als besonders wichtig markieren („Merke“, Zusammenfassung, „klausurrelevant“)
+WEGLASSEN: Beispiele, Einzelzahlen und Statistiken ohne zentrale Bedeutung, Nebenaspekte, Exkurse, Wiederholungs- und Quizfragen, Vergleiche und Überblicke, die nur Einzelkarten wiederholen, Titel-, Gliederungs-, Literatur- und Organisationsfolien.`;
+const coverRules = o => compact(o) ? COMPACT_COVER : COVER_RULES;
 function courseLine() {
   const c = $('#course').value.trim(), l = $('#lecture').value.trim();
   return `Kurs: ${c || '(nicht angegeben)'}\nVorlesung: ${l || '(nicht angegeben)'}`;
 }
 function cardPrompt(chunk, idx, total, o, withImages) {
-  return `Du erstellst Anki-Karteikarten aus Vorlesungsmaterial für ein Psychologie-Studium. ${o.density === 'sehrkompakt' ? 'Ziel ist ein sehr kompaktes Deck mit nur dem Wichtigsten der Vorlesung.' : 'Ziel ist eine 1,0 in der Klausur: Jeder prüfungsrelevante Inhalt des Materials muss durch mindestens eine Karte abgedeckt sein.'}
+  return `Du erstellst Anki-Karteikarten aus Vorlesungsmaterial für ein Psychologie-Studium. ${{ sehrkompakt: 'Ziel ist ein sehr kompaktes Deck mit nur dem Allerwichtigsten der Vorlesung.', kompakt: 'Ziel ist ein kompaktes Deck mit den Kerninhalten der Vorlesung, so knapp wie ein gutes selbst geschriebenes Deck. Wenige, gut gebündelte Karten sind hier besser als viele.' }[o.density] || 'Ziel ist eine 1,0 in der Klausur: Jeder prüfungsrelevante Inhalt des Materials muss durch mindestens eine Karte abgedeckt sein.'}
 
 ${courseLine()}
 Ausschnitt: Teil ${idx + 1} von ${total} (${chunkLabel(chunk)}). Erstelle Karten nur für diesen Ausschnitt.
@@ -1665,7 +1702,7 @@ ${STYLE_RULES}
 
 ${typeRules(o)}${occlusionRule(o, withImages)}
 
-${formulaRules(o)}${COVER_RULES}
+${formulaRules(o)}${coverRules(o)}
 
 REGELN:
 - Nutze nur Inhalte aus dem Material. Erfinde keine Fakten, Studien, Jahreszahlen oder Zahlen. Enthält eine Folie nur Stichworte, bleib nah an diesen Stichworten. Einzige Ausnahme: die Lösung von Wiederholungs- und Quizfragen (siehe oben).
@@ -1674,16 +1711,17 @@ REGELN:
   · Lückentext- und Umkehrkarten zu Inhalten, die schon eine Frage-Karte abfragt, und umgekehrt;
   · Vergleichs-, Kritik- und Überblickskarten: nur der Unterschied, die Kritik oder die Oberbegriffe, nicht noch einmal die Erklärungen, die auf anderen Karten stehen;
   · Rückseiten und Lückentext-Zusätze: nur, was die Frage verlangt, keine Punkte, die eine andere Karte abfragt.
-- Sorgfalt: Zahlen, Jahreszahlen, Namen, Fachbegriffe und Zuordnungen (wer sagt was, was gehört zu welchem Modell) exakt wie im Material. Prüfe jede Karte, bevor du sie ausgibst: Beantwortet die Rückseite genau die Frage, stimmt die Anzahl in Klammern mit den Stichpunkten überein, fehlt kein Punkt einer Aufzählung der Folie?
-- Aufzählungen vollständig: Nennt eine Folie eine Liste, steht jeder Punkt auf einer Karte (bei mehr als 7 Punkten auf mehreren); keiner fällt weg.
-- Grafiken, Tabellen und Abbildungen (wo ein Folienbild beiliegt): mindestens eine Karte zu ihrer Kernaussage (Verlauf, Gipfel, Vergleich, die wichtigsten Werte), nicht zu jedem Einzelwert.
+- Sorgfalt: Zahlen, Jahreszahlen, Namen, Fachbegriffe und Zuordnungen (wer sagt was, was gehört zu welchem Modell) exakt wie im Material. Prüfe jede Karte, bevor du sie ausgibst: Beantwortet die Rückseite genau die Frage, stimmt die Anzahl in Klammern mit den Stichpunkten überein${compact(o) ? '' : ', fehlt kein Punkt einer Aufzählung der Folie'}?
+${compact(o) ? `- Aufzählungen kommen gebündelt auf eine Karte (die Punkte als Stichpunkte, bei langen Listen nur die Oberbegriffe).
+- Grafiken, Tabellen und Abbildungen nur, wenn sie eine Kernaussage der Vorlesung zeigen; dann eine Karte zu dieser Aussage.` : `- Aufzählungen vollständig: Nennt eine Folie eine Liste, steht jeder Punkt auf einer Karte (bei mehr als 7 Punkten auf mehreren); keiner fällt weg.
+- Grafiken, Tabellen und Abbildungen (wo ein Folienbild beiliegt): mindestens eine Karte zu ihrer Kernaussage (Verlauf, Gipfel, Vergleich, die wichtigsten Werte), nicht zu jedem Einzelwert.`}
 - Links und Literaturangaben sind kein Lernstoff. Autor:innen und Jahr einer Studie oder Theorie fragst du ab, wenn die Folie sie als Inhalt nennt.
 - Ausgelesener Folientext ist bei Formeln oft unvollständig: Klammern, Brüche, Wurzeln, Exponenten und Summenzeichen fehlen (z. B. „VAR X = E X − E X 2“ statt VAR(X) = E((X − E(X))<sup>2</sup>)). Bei manchen PDFs ist er Zeichensalat. Rekonstruiere Formeln in der üblichen Notation des Fachs und prüfe sie an den Rechenbeispielen der Folien. Wo ein Folienbild beiliegt, ist es maßgeblich. Unlesbare Stellen ohne Bild lässt du weg, statt zu raten.
 - "slide": die Nummer N aus der Überschrift „=== Datei · Folie N ===“ (bzw. Seite/Abschnitt N), aus der die Karte stammt.
 - "topic": Unterthema in 1–4 Wörtern; für alle Karten zum selben Thema gleich geschrieben.
 - Reihenfolge der Karten = Reihenfolge im Material.
 - Sprache: ${langRule(o)}
-- Umfang: ${densityRule(o)}
+- Umfang: ${sizeRule(chunk.units, o)}
 ${Array.isArray(withImages) ? `- Zu ${withImages.length === 1 ? 'Folie' : 'den Folien'} ${withImages.join(', ')} ist je ein Bild angehängt (in dieser Reihenfolge), weil der ausgelesene Text dort unvollständig ist (Formeln, unlesbare Zeichen oder kaum Text neben einer Abbildung). Maßgeblich ist das Bild.\n` : withImages ? '- Zu jeder Folie ist ein Bild angehängt, in derselben Reihenfolge wie die Folien im Material. Nutze die Bilder für Diagramme, Abbildungen, Tabellen und Text, der im extrahierten Folientext fehlt.\n' : ''}
 ANFORDERUNGEN DES NUTZERS (haben Vorrang vor allen anderen Regeln, auch vor Vollständigkeit und Umfang):
 ${o.req || '(keine)'}
@@ -2029,11 +2067,11 @@ ${courseLine()}
 Material: ${chunkLabel(group)}
 
 AUFGABE:
-1. Gehe das Material Folie für Folie durch und vergleiche es mit der Kartenliste. ${compact(o) ? `Das Deck ist bewusst ${o.density === 'sehrkompakt' ? 'sehr ' : ''}kompakt (${densityRule(o)}). Ergänze nur zentrale Inhalte, die in diesem Umfang fehlen.` : 'Erstelle neue Karten für jeden prüfungsrelevanten Inhalt, der noch NICHT abgedeckt ist.'} Erstelle keine Karten zu Inhalten, die schon abgedeckt sind, auch nicht anders formuliert.
+1. Gehe das Material Folie für Folie durch und vergleiche es mit der Kartenliste. ${compact(o) ? `Das Deck ist bewusst ${o.density === 'sehrkompakt' ? 'sehr ' : ''}kompakt (${densityRule(o)}). ${review.addMax ? `Ergänze höchstens ${review.addMax} ${review.addMax === 1 ? 'Karte' : 'Karten'}, nur für zentrale Inhalte, die ganz fehlen.` : 'Ergänze keine Karten.'}` : 'Erstelle neue Karten für jeden prüfungsrelevanten Inhalt, der noch NICHT abgedeckt ist.'} Erstelle keine Karten zu Inhalten, die schon abgedeckt sind, auch nicht anders formuliert.
 2. Nenne in "duplicates" die IDs von Karten, deren Inhalt ganz oder größtenteils schon auf einer anderen Karte der Liste steht: wörtliche oder umformulierte Wiederholungen, Lückentext- oder Umkehrkarten zu schon abgefragten Inhalten, Vergleichs- oder Zusammenfassungskarten, die nur Einzelkarten wiederholen. Jeweils nur die Karte, die weniger Neues bringt. Karten mit „Bildverdeckung:“ fragen die Lage im Diagramm ab und sind nie Dubletten.
 3. Prüfe jede Karte der Liste sorgfältig gegen das Material: Zahlen, Jahreszahlen, Namen, Fachbegriffe, Zuordnungen (wer sagt was, was gehört zu welchem Modell), Vollständigkeit von Aufzählungen und die Anzahl in Klammern. Ist eine Karte sachlich falsch, unvollständig oder missverständlich, gib eine korrigierte Fassung aus. Korrigiere nur Fehler gegenüber dem Material, nicht den Stil; fehlerfreie Karten gibst du nicht aus. Bildverdeckungskarten korrigierst du nicht. Zahlen, die nicht im Folientext stehen, stammen oft aus Grafiken: Prüfe sie am Folienbild; ohne Bild änderst du sie nur, wenn das Material ihnen widerspricht.
 
-${COVER_RULES}
+${coverRules(o)}
 
 ${STYLE_RULES}
 ${libraryStyleBlock(o) ? '\n' + libraryStyleBlock(o).split('\n\nBEISPIELE')[0] + '\n' : ''}
@@ -2228,9 +2266,10 @@ async function runCardJob(job, total, o) {
       },
     });
     await Promise.all(pending);
+    const cut = compact(o) ? keepBudget(job, o) : 0;
     // A section of picture-only or near-empty slides may rightly give no card.
     if (!job.n && !job.skip && job.chunk.units.some(u => unitText(u).length >= 40)) throw { code: 'bad_shape' };
-    job.status = 'fertig'; job.done = !job.n ? (job.skip ? 'übersprungen: ' + job.skip : 'keine Karten (kaum Inhalt)') : karten(job.n) + (res.truncated ? ' (gekürzt, Lückensuche ergänzt den Rest)' : '');
+    job.status = 'fertig'; job.done = !job.n ? (job.skip ? 'übersprungen: ' + job.skip : 'keine Karten (kaum Inhalt)') : karten(job.n - cut) + (cut ? ` (${cut} über dem Umfang weggelassen)` : '') + (res.truncated ? ' (gekürzt, Lückensuche ergänzt den Rest)' : '');
   } catch (e) {
     await Promise.all(pending);
     // Cards that streamed in before a failure are complete and stay; a refusal withdraws them.
@@ -2239,6 +2278,23 @@ async function runCardJob(job, total, o) {
     else { job.status = 'fehler'; job.err = errText(e) + (job.n && e.code !== 'refused' ? ` (${karten(job.n)} ${job.n === 1 ? 'ist' : 'sind'} schon da)` : ''); if (e && FATAL.has(e.code)) { cardCtl.fatal = job.err; cardCtl.abort(); } }
   }
   sortCards(); saveCards(); saveCardRun(); renderDeck(true); paintCardProgress();
+}
+// A compact section keeps to its budget (20 % leeway): if Claude wrote more, cards go in this order: from the slides
+// with the most cards, cloze and reverse cards first (in a compact deck they mostly restate a question), then from
+// slides with little text, then the later card. Every slide keeps a card as long as the budget allows.
+function keepBudget(job, o) {
+  const budget = cardRange(job.chunk.units, o)[0], limit = budget + Math.floor(budget * 0.2);
+  const mine = state.cards.filter(c => c.job === job.key && counted(c));
+  const textOf = new Map(job.chunk.units.map(u => [u.num, contentText(u).length]));
+  let cut = 0;
+  while (mine.length > limit) {
+    const by = new Map();
+    mine.forEach(c => by.set(c.slide, (by.get(c.slide) || 0) + 1));
+    const side = c => c.type === 'basic' ? 0 : 1;
+    const c = mine.slice().sort((a, b) => by.get(b.slide) - by.get(a.slide) || side(b) - side(a) || (textOf.get(a.slide) || 0) - (textOf.get(b.slide) || 0) || mine.indexOf(b) - mine.indexOf(a))[0];
+    mine.splice(mine.indexOf(c), 1); state.cards.splice(state.cards.indexOf(c), 1); cut++;
+  }
+  return cut;
 }
 function paintCardProgress() { renderProgress('#card-progress', cardJobs, retryCardJob); }
 async function retryCardJob(job) {
@@ -2344,7 +2400,9 @@ async function continueCards() {
   const removed = cardCtl.signal.aborted ? 0 : dropDuplicates();
   const fixed = state.cards.filter(c => c.fixed >= started).length;
   const secs = Math.round((Date.now() - started) / 1000);
-  msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${karten(state.cards.length)} in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}${costNote(cost0)}.`;
+  const range = cardRange(cardJobs.filter(j => j.kind === 'gen' && j.chunk).flatMap(j => j.chunk.units), o);
+  const goal = !range[0] ? '' : compact(o) ? `, Ziel für „${o.density === 'kompakt' ? 'Kompakt' : 'Sehr kompakt'}“ etwa ${range[0]}` : `, Richtwert ${range[0]}–${range[1]}`;
+  msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${karten(state.cards.length)}${goal} in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}${costNote(cost0)}.`;
   if (fixed) msg.textContent += ` ${fixed} ${fixed === 1 ? 'Karte' : 'Karten'} bei der Prüfung korrigiert (markiert).`;
   if (removed) msg.textContent += ` ${removed} ${removed === 1 ? 'Karte' : 'Karten'} mit doppeltem Inhalt entfernt.`;
   if (bare.length) msg.textContent += ` Ohne Karte geblieben: ${bare.length === 1 ? 'Folie' : 'Folien'} ${compactNums(bare.map(u => u.num))} (im Raster rot). Prüfe sie mit „Lücken suchen“ oder per Klick auf die Folie.`;
@@ -2384,7 +2442,11 @@ async function runCoverageJob(job, opts) {
     const look = reviewSlides(g, inGroup);
     const blobs = await Promise.all(look.map(u => claudeSlide(u.fileId, u.num)));
     const seen = look.map(u => u.num).filter((n, i) => blobs[i]), images = blobs.filter(Boolean);
-    await streamItems(coveragePrompt(g, inGroup, o, { seen, findings: reviewFindings(g, inGroup, o, seen) }), {
+    // A compact deck gets few additions: 15 % of its budget ("Kompakt"), 10 % ("Sehr kompakt"), and only as far as the
+    // budget (with its 20 % leeway) has room.
+    const budget = cardRange(g.units, o)[0], room = budget + Math.floor(budget * 0.2) - inGroup.filter(counted).length;
+    const addMax = compact(o) ? Math.min(Math.round(budget * (o.density === 'kompakt' ? 0.15 : 0.1)), Math.max(0, room)) : Infinity;
+    await streamItems(coveragePrompt(g, inGroup, o, { seen, findings: reviewFindings(g, inGroup, o, seen), addMax }), {
       tier: o.tier, effort: o.tier === 'complex' ? EFFORT.coverageCareful : EFFORT.coverage, signal: cardCtl.signal, images: images.length ? images : undefined,
       onItem: r => {
         if (!cardJobs.includes(job)) return;
@@ -2405,7 +2467,7 @@ async function runCoverageJob(job, opts) {
           r.duplicates.map(String).forEach(id => { if (ids.has(id)) { const c = state.cards.find(x => x.id === id); if (c && !c.dupe && c.type !== 'occlusion') { c.dupe = true; dupes++; } } });
         } else {
           const c = normalizeCards([r], g, o, true)[0];
-          if (!c) return;
+          if (!c || (counted(c) && job.n >= addMax)) return;
           c.job = job.key; state.cards.push(c); job.n++;
         }
         job.live = `+${job.n} ergänzt`;
