@@ -308,6 +308,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:14px}
               <legend>Umfang</legend>
               <label class="choice"><input type="radio" name="density" value="sehrkompakt"><span>Sehr kompakt<small>Nur das Allerwichtigste, etwa 1 Karte pro 4 Folien</small></span></label>
               <label class="choice"><input type="radio" name="density" value="kompakt"><span>Kompakt<small>Die Kerninhalte, etwa 1 Karte pro 2 Folien – so dicht wie ein typisches selbst geschriebenes Deck</small></span></label>
+              <label class="choice"><input type="radio" name="density" value="ausgewogen"><span>Ausgewogen<small>Alles Wichtige ohne Details, etwa 1 Karte pro Folie</small></span></label>
               <label class="choice"><input type="radio" name="density" value="vollstaendig" checked><span>Vollständig<small>Jede prüfungsrelevante Aussage, 1–2 Karten pro Folie</small></span></label>
               <label class="choice"><input type="radio" name="density" value="maximal"><span>Maximal<small>Zusätzlich Detail- und Verständnisfragen, 2–4 Karten pro Folie</small></span></label>
             </fieldset>
@@ -1455,7 +1456,7 @@ function occlusionRule(o, withImages) {
 
 BILDVERDECKUNG:
 - Zeigt eine Folie ein beschriftetes Diagramm, Modell, Schema oder eine Abbildung, bei der die Lage der Beschriftungen prüfungsrelevant ist${compact(o) ? ' und das zu den Kerninhalten der Vorlesung gehört' : ''} (z. B. Bestandteile eines Modells mit Pfeilen, Achsen und Kurven einer Grafik, Hirnareale), erstelle für diese Folie zusätzlich genau eine Karte {"type":"occlusion","front":"kurze Aufgabe, z. B. Beschrifte das Modell der KTT","labels":["…","…"],"slide":12,"topic":"…"}.
-- "labels": ${o.density === 'sehrkompakt' ? '3–4 der wichtigsten' : o.density === 'kompakt' ? '3–6 der wichtigsten' : '3–12'} Beschriftungen aus dem Diagramm (jede wird eine eigene Anki-Karte), Zeichen für Zeichen wie im ausgelesenen Folientext (nicht übersetzen, kürzen oder umformulieren). Keine Folienüberschrift, keine ganzen Sätze, keine Quellenangaben.
+- "labels": ${o.density === 'sehrkompakt' ? '3–4 der wichtigsten' : o.density === 'kompakt' ? '3–6 der wichtigsten' : o.density === 'ausgewogen' ? '3–8 der wichtigsten' : '3–12'} Beschriftungen aus dem Diagramm (jede wird eine eigene Anki-Karte), Zeichen für Zeichen wie im ausgelesenen Folientext (nicht übersetzen, kürzen oder umformulieren). Keine Folienüberschrift, keine ganzen Sätze, keine Quellenangaben.
 - Nicht für reine Text- oder Aufzählungsfolien und nicht für Diagramme, deren Beschriftungen nur im Bild und nicht im ausgelesenen Text stehen. Die übrigen Karten zur Folie schreibst du wie gewohnt.`;
 }
 function formulaRules(o) {
@@ -1477,10 +1478,15 @@ function langRule(o) {
   return { auto: 'Schreibe in der Sprache der jeweiligen Folien: deutsche Folien → deutsche Karten, englische Folien → englische Karten.', de: 'Schreibe auf Deutsch. Stehen die Folien auf Englisch, ergänze den englischen Fachbegriff in Klammern.', en: 'Write the cards in English.' }[o.lang];
 }
 const compact = o => o.density === 'kompakt' || o.density === 'sehrkompakt';
+// Levels with a binding number of cards per section: the compact ones and "Ausgewogen".
+const budgeted = o => compact(o) || o.density === 'ausgewogen';
+const LEVEL_NAME = { sehrkompakt: 'Sehr kompakt', kompakt: 'Kompakt', ausgewogen: 'Ausgewogen', vollstaendig: 'Vollständig', maximal: 'Maximal' };
 // The levels, in cards per slide with content. The user's own decks have about 22 cards per lecture (1 card per 2
-// slides): "Kompakt" matches them, "Sehr kompakt" is half of that. For both, the number is a budget per section that
-// the prompt states and runCardJob enforces; formula, calculation and image occlusion cards do not count.
-const PER_SLIDE = { sehrkompakt: [0.25, 0.25], kompakt: [0.5, 0.5], vollstaendig: [1, 2], maximal: [2, 4] };
+// slides): "Kompakt" matches them, "Sehr kompakt" is half of that. "Ausgewogen" sits between "Kompakt" and
+// "Vollständig" (for 30 slides the user saw 12 and 67 cards): 1 per slide. For these three the number is a budget per
+// section that the prompt states and runCardJob enforces; formula, calculation and image occlusion cards and further
+// parts of a split content do not count.
+const PER_SLIDE = { sehrkompakt: [0.25, 0.25], kompakt: [0.5, 0.5], ausgewogen: [1, 1], vollstaendig: [1, 2], maximal: [2, 4] };
 // Slides with content: text slides (without links and references, at least 60 characters) count fully, picture slides
 // half, literature and credit slides not at all.
 function contentWeight(units) {
@@ -1494,14 +1500,14 @@ function cardRange(units, o) {
 // a content that was split because it was too much for one card ("teil": true).
 const counted = c => c.type !== 'occlusion' && !c.kind && !c.part;
 function densityRule(o) {
-  return { sehrkompakt: 'Sehr kompakt: nur das Allerwichtigste, etwa 1 Karte pro 4 inhaltlichen Folien: die zentralen Fachbegriffe, die Kernaussagen der wichtigsten Theorien und Modelle und die zentralen Befunde. Weniger Inhalte, nicht vollere Karten: jede Karte bleibt klein (siehe Kartengröße). Details, Beispiele, Einzelzahlen, Nebenaspekte, Exkurse, Wiederholungs- und Quizfragen weglassen.', kompakt: 'Kompakt: die Kerninhalte, etwa 1 Karte pro 2 inhaltlichen Folien, so dicht wie ein gutes selbst geschriebenes Deck: zentrale Fachbegriffe und Definitionen, Kernaussagen von Theorien und Modellen, wichtige Studien mit Kernbefund. Kompakt heißt weniger Inhalte, nicht vollere Karten: jede Karte bleibt klein (siehe Kartengröße); ist ein Kerninhalt zu groß für eine Karte, wird er aufgeteilt. Details, Beispiele, Einzelzahlen, Nebenaspekte und Exkurse weglassen.', vollstaendig: 'Vollständig: jede prüfungsrelevante Aussage, etwa 1–2 Karten pro inhaltlicher Folie. Ist ein Inhalt zu groß für eine Karte, wird er auf mehrere aufgeteilt (siehe Kartengröße). Lieber eine Karte mehr als eine Lücke.', maximal: 'Maximal: zusätzlich Detailwissen und Verständnisfragen (Warum? Wie hängt … zusammen? Was folgt daraus?), etwa 2–4 Karten pro inhaltlicher Folie.' }[o.density];
+  return { sehrkompakt: 'Sehr kompakt: nur das Allerwichtigste, etwa 1 Karte pro 4 inhaltlichen Folien: die zentralen Fachbegriffe, die Kernaussagen der wichtigsten Theorien und Modelle und die zentralen Befunde. Weniger Inhalte, nicht vollere Karten: jede Karte bleibt klein (siehe Kartengröße). Details, Beispiele, Einzelzahlen, Nebenaspekte, Exkurse, Wiederholungs- und Quizfragen weglassen.', kompakt: 'Kompakt: die Kerninhalte, etwa 1 Karte pro 2 inhaltlichen Folien, so dicht wie ein gutes selbst geschriebenes Deck: zentrale Fachbegriffe und Definitionen, Kernaussagen von Theorien und Modellen, wichtige Studien mit Kernbefund. Kompakt heißt weniger Inhalte, nicht vollere Karten: jede Karte bleibt klein (siehe Kartengröße); ist ein Kerninhalt zu groß für eine Karte, wird er aufgeteilt. Details, Beispiele, Einzelzahlen, Nebenaspekte und Exkurse weglassen.', ausgewogen: 'Ausgewogen: alles Wichtige der Vorlesung ohne Details, etwa 1 Karte pro inhaltlicher Folie: Fachbegriffe und Definitionen, Theorien und Modelle mit Annahmen und Komponenten, Studien mit Autor:innen, Jahr und Befund, Mechanismen, wichtige Vergleiche und Kritik, zentrale Zahlen. Nebensächliches, Beispiele (außer zentralen), Exkurse und Einzelzahlen ohne Bedeutung weglassen. Ist ein Inhalt zu groß für eine Karte, wird er aufgeteilt (siehe Kartengröße).', vollstaendig: 'Vollständig: jede prüfungsrelevante Aussage, etwa 1–2 Karten pro inhaltlicher Folie. Ist ein Inhalt zu groß für eine Karte, wird er auf mehrere aufgeteilt (siehe Kartengröße). Lieber eine Karte mehr als eine Lücke.', maximal: 'Maximal: zusätzlich Detailwissen und Verständnisfragen (Warum? Wie hängt … zusammen? Was folgt daraus?), etwa 2–4 Karten pro inhaltlicher Folie.' }[o.density];
 }
 // The size line of a section: a hard limit for the compact levels, a guide otherwise.
 function sizeRule(units, o) {
   const [lo, hi] = cardRange(units, o), w = contentWeight(units);
   if (!lo) return densityRule(o);
   const slides = `${String(Math.round(w * 10) / 10).replace('.', ',')} inhaltliche Folien`;
-  return compact(o)
+  return budgeted(o)
     ? `${densityRule(o)} Für diesen Ausschnitt (etwa ${slides}): HÖCHSTENS ${lo} ${lo === 1 ? 'Karte' : 'Karten'}. Diese Zahl ist verbindlich und hat Vorrang vor allen Regeln zur Vollständigkeit; wähle die prüfungsrelevantesten Inhalte. Sie zählt Inhalte, nicht Karten: Teilst du einen Inhalt auf, weil er für eine Karte zu groß ist, setze bei der zweiten und jeder weiteren Karte dieses Inhalts "teil":true; diese zählen nicht mit, ebenso Formel-, Rechen- und Bildverdeckungskarten.`
     : `${densityRule(o)} Für diesen Ausschnitt (etwa ${slides}) also ungefähr ${lo}–${hi} Karten.`;
 }
@@ -1512,13 +1518,24 @@ const COMPACT_COVER = `WAS IN EIN KOMPAKTES DECK GEHÖRT:
 - die wichtigsten Studien mit ihrem Kernbefund
 - was die Folien als besonders wichtig markieren („Merke“, Zusammenfassung, „klausurrelevant“)
 WEGLASSEN: Beispiele, Einzelzahlen und Statistiken ohne zentrale Bedeutung, Nebenaspekte, Exkurse, Wiederholungs- und Quizfragen, Vergleiche und Überblicke, die nur Einzelkarten wiederholen, Titel-, Gliederungs-, Literatur- und Organisationsfolien.`;
-const coverRules = o => compact(o) ? COMPACT_COVER : COVER_RULES;
+// What a balanced deck covers: the full list without the details.
+const BALANCED_COVER = `WAS IN EIN AUSGEWOGENES DECK GEHÖRT:
+- Definitionen und Fachbegriffe
+- Theorien und Modelle: Annahmen, Komponenten, Ablauf, Vorhersagen
+- Studien: Autor:innen und Jahr, Fragestellung, zentraler Befund
+- Mechanismen und Zusammenhänge (auch Warum- und Wie-Fragen)
+- wichtige Vergleiche, Abgrenzungen und Kritik
+- zentrale Zahlen und Kriterien, Formeln
+- alles, was als wichtig markiert ist („Merke“, Zusammenfassung, „klausurrelevant“, Hinweise der Lehrperson)
+- Wiederholungs- und Quizfragen der Folien, wenn sie Kerninhalte abfragen und die Lösung eindeutig ist
+WEGLASSEN: Nebensächliches, Beispiele außer zentralen, Exkurse, Einzelzahlen ohne Bedeutung, Titel-, Gliederungs-, Literatur- und Organisationsfolien.`;
+const coverRules = o => compact(o) ? COMPACT_COVER : o.density === 'ausgewogen' ? BALANCED_COVER : COVER_RULES;
 function courseLine() {
   const c = $('#course').value.trim(), l = $('#lecture').value.trim();
   return `Kurs: ${c || '(nicht angegeben)'}\nVorlesung: ${l || '(nicht angegeben)'}`;
 }
 function cardPrompt(chunk, idx, total, o, withImages) {
-  return `Du erstellst Anki-Karteikarten aus Vorlesungsmaterial für ein Psychologie-Studium. ${{ sehrkompakt: 'Ziel ist ein sehr kompaktes Deck mit nur dem Allerwichtigsten der Vorlesung.', kompakt: 'Ziel ist ein kompaktes Deck mit den Kerninhalten der Vorlesung, so knapp wie ein gutes selbst geschriebenes Deck. Wenige, gut gebündelte Karten sind hier besser als viele.' }[o.density] || 'Ziel ist eine 1,0 in der Klausur: Jeder prüfungsrelevante Inhalt des Materials muss durch mindestens eine Karte abgedeckt sein.'}
+  return `Du erstellst Anki-Karteikarten aus Vorlesungsmaterial für ein Psychologie-Studium. ${{ sehrkompakt: 'Ziel ist ein sehr kompaktes Deck mit nur dem Allerwichtigsten der Vorlesung.', kompakt: 'Ziel ist ein kompaktes Deck mit den Kerninhalten der Vorlesung, so knapp wie ein gutes selbst geschriebenes Deck: wenige Inhalte, jede Karte klein.', ausgewogen: 'Ziel ist ein ausgewogenes Deck für eine sehr gute Klausurnote: alles Wichtige der Vorlesung, aber ohne Details und Nebensächliches.' }[o.density] || 'Ziel ist eine 1,0 in der Klausur: Jeder prüfungsrelevante Inhalt des Materials muss durch mindestens eine Karte abgedeckt sein.'}
 
 ${courseLine()}
 Ausschnitt: Teil ${idx + 1} von ${total} (${chunkLabel(chunk)}). Erstelle Karten nur für diesen Ausschnitt.
@@ -1873,7 +1890,7 @@ function overload(c) {
 function reviewFindings(group, cardsInGroup, o, seen) {
   const out = [];
   const units = state.units.filter(u => u.fileId === group.fileId);
-  if (!compact(o)) {
+  if (!budgeted(o)) {
     const onCards = new Set(state.cards.filter(c => c.fileId === group.fileId && !c.draft).flatMap(c => [...termsOf(c.front + ' ' + (c.back || '')).keys()]));
     for (const u of group.units) {
       const text = contentText(u), t = termsOf(text);
@@ -1905,7 +1922,7 @@ function reviewSlides(group, cardsInGroup) {
 }
 function coveragePrompt(group, cardsInGroup, o, review = {}) {
   const seen = review.seen || [], findings = review.findings || [];
-  const without = compact(o) ? [] : group.units.filter(u => unitText(u).length >= 80 && !cardsInGroup.some(c => c.slide === u.num)).map(u => u.num);
+  const without = budgeted(o) ? [] : group.units.filter(u => unitText(u).length >= 80 && !cardsInGroup.some(c => c.slide === u.num)).map(u => u.num);
   const list = cardsInGroup.map(c => `${c.id} | ${c.slide || '-'} | ${stripHtml(c.front).slice(0, 300)} → ${c.type === 'occlusion' ? 'Bildverdeckung: ' + c.occ.rects.map(r => r.label).filter(Boolean).join(', ').slice(0, 160) : stripHtml(c.back).slice(0, 700)}`).join('\n');
   return `Du prüfst ein Anki-Deck auf Vollständigkeit und Richtigkeit für eine Klausur in einem Psychologie-Studium (Ziel: Note 1,0).
 
@@ -1913,7 +1930,7 @@ ${courseLine()}
 Material: ${chunkLabel(group)}
 
 AUFGABE:
-1. Gehe das Material Folie für Folie durch und vergleiche es mit der Kartenliste. ${compact(o) ? `Das Deck ist bewusst ${o.density === 'sehrkompakt' ? 'sehr ' : ''}kompakt (${densityRule(o)}). ${review.addMax ? `Ergänze höchstens ${review.addMax} ${review.addMax === 1 ? 'Karte' : 'Karten'}, nur für zentrale Inhalte, die ganz fehlen.` : 'Ergänze keine Karten.'}` : 'Erstelle neue Karten für jeden prüfungsrelevanten Inhalt, der noch NICHT abgedeckt ist.'} Erstelle keine Karten zu Inhalten, die schon abgedeckt sind, auch nicht anders formuliert.
+1. Gehe das Material Folie für Folie durch und vergleiche es mit der Kartenliste. ${budgeted(o) ? `Das Deck hat bewusst einen begrenzten Umfang (${densityRule(o)}). ${review.addMax ? `Ergänze höchstens ${review.addMax} ${review.addMax === 1 ? 'Karte' : 'Karten'}, nur für zentrale Inhalte, die ganz fehlen.` : 'Ergänze keine Karten.'}` : 'Erstelle neue Karten für jeden prüfungsrelevanten Inhalt, der noch NICHT abgedeckt ist.'} Erstelle keine Karten zu Inhalten, die schon abgedeckt sind, auch nicht anders formuliert.
 2. Nenne in "duplicates" die IDs von Karten, deren Inhalt ganz oder größtenteils schon auf einer anderen Karte der Liste steht: wörtliche oder umformulierte Wiederholungen, Lückentext- oder Umkehrkarten zu schon abgefragten Inhalten, Vergleichs- oder Zusammenfassungskarten, die nur Einzelkarten wiederholen. Jeweils nur die Karte, die weniger Neues bringt. Karten mit „Bildverdeckung:“ fragen die Lage im Diagramm ab und sind nie Dubletten.
 3. Prüfe jede Karte der Liste sorgfältig gegen das Material: Zahlen, Jahreszahlen, Namen, Fachbegriffe, Zuordnungen (wer sagt was, was gehört zu welchem Modell), Vollständigkeit von Aufzählungen und die Anzahl in Klammern. Ist eine Karte sachlich falsch, unvollständig oder missverständlich, gib eine korrigierte Fassung aus. Korrigiere nur Fehler gegenüber dem Material, nicht den Stil; fehlerfreie Karten gibst du nicht aus. Bildverdeckungskarten korrigierst du nicht. Zahlen, die nicht im Folientext stehen, stammen oft aus Grafiken: Prüfe sie am Folienbild; ohne Bild änderst du sie nur, wenn das Material ihnen widerspricht.
 4. Teile jede Karte auf, die mehr hält als die Kartengröße erlaubt (zwei Fragen in einer, zu viele oder zu lange Stichpunkte): 2–4 kleinere Karten mit je einer eigenen, genauen Frage, zusammen mit genau dem Inhalt der alten Karte, nichts weglassen, nichts dazuerfinden. Das gilt auch im kompakten Umfang; aufgeteilte Karten zählen nicht als Ergänzungen.
@@ -2116,7 +2133,7 @@ async function runCardJob(job, total, o) {
       },
     });
     await Promise.all(pending);
-    const cut = compact(o) ? keepBudget(job, o) : 0;
+    const cut = budgeted(o) ? keepBudget(job, o) : 0;
     // A section of picture-only or near-empty slides may rightly give no card.
     if (!job.n && !job.skip && job.chunk.units.some(u => unitText(u).length >= 40)) throw { code: 'bad_shape' };
     job.status = 'fertig'; job.done = !job.n ? (job.skip ? 'übersprungen: ' + job.skip : 'keine Karten (kaum Inhalt)') : karten(job.n - cut) + (cut ? ` (${cut} über dem Umfang weggelassen)` : '') + (res.truncated ? ' (gekürzt, Lückensuche ergänzt den Rest)' : '');
@@ -2129,7 +2146,7 @@ async function runCardJob(job, total, o) {
   }
   sortCards(); saveCards(); saveCardRun(); renderDeck(true); paintCardProgress();
 }
-// A compact section keeps to its budget (20 % leeway): if Claude wrote more, cards go in this order: from the slides
+// A budgeted section keeps to its budget (20 % leeway): if Claude wrote more, cards go in this order: from the slides
 // with the most cards, cloze and reverse cards first (in a compact deck they mostly restate a question), then from
 // slides with little text, then the later card. Every slide keeps a card as long as the budget allows.
 function keepBudget(job, o) {
@@ -2180,8 +2197,8 @@ async function generateCards() {
   setCardBusy(false);
   if (!picked) return;
   o.filter = slideFilter(o.req);
-  const per = { maximal: 6, kompakt: 12, sehrkompakt: 16 }[o.density] || 8;
-  const maxChars = { maximal: 5000, kompakt: 12000, sehrkompakt: 16000 }[o.density] || 7000;
+  const per = { maximal: 6, ausgewogen: 10, kompakt: 12, sehrkompakt: 16 }[o.density] || 8;
+  const maxChars = { maximal: 5000, ausgewogen: 9000, kompakt: 12000, sehrkompakt: 16000 }[o.density] || 7000;
   const maxUnits = o.images ? Math.max(1, Math.min(per, caps.imageMax)) : per;
   const chunks = makeChunks(usableUnits(true).filter(u => inFilter(u, o.filter)), maxChars, maxUnits, true);
   if (!chunks.length) { msg.textContent = o.filter ? `In der Auswahl (${describeFilter(o.filter)}) ist kein Material.` : 'Im Material wurde kein Text gefunden. Aktiviere „Folienbilder mitsenden“ für gescannte PDFs.'; return; }
@@ -2249,12 +2266,12 @@ async function continueCards() {
   setCardBusy(false);
   if (fresh !== freshCount) return;
   // Before removing duplicates: a slide whose card repeated another one is covered.
-  const bare = cardCtl.signal.aborted || failed || compact(o) ? [] : state.units.filter(u => inFilter(u, o.filter) && unitText(u).length >= 80 && !state.cards.some(c => c.fileId === u.fileId && c.slide === u.num));
+  const bare = cardCtl.signal.aborted || failed || budgeted(o) ? [] : state.units.filter(u => inFilter(u, o.filter) && unitText(u).length >= 80 && !state.cards.some(c => c.fileId === u.fileId && c.slide === u.num));
   const removed = cardCtl.signal.aborted ? 0 : dropDuplicates();
   const fixed = state.cards.filter(c => c.fixed >= started).length;
   const secs = Math.round((Date.now() - started) / 1000);
   const range = cardRange(cardJobs.filter(j => j.kind === 'gen' && j.chunk).flatMap(j => j.chunk.units), o);
-  const goal = !range[0] ? '' : compact(o) ? `, Ziel für „${o.density === 'kompakt' ? 'Kompakt' : 'Sehr kompakt'}“ etwa ${range[0]}` : `, Richtwert ${range[0]}–${range[1]}`;
+  const goal = !range[0] ? '' : budgeted(o) ? `, Ziel für „${LEVEL_NAME[o.density]}“ etwa ${range[0]}` : `, Richtwert ${range[0]}–${range[1]}`;
   msg.textContent = cardCtl.signal.aborted ? (cardCtl.fatal || 'Gestoppt.') : failed ? `${failed} ${failed === 1 ? 'Abschnitt ist' : 'Abschnitte sind'} fehlgeschlagen. Klicke dort auf „Erneut versuchen“.` : `Fertig: ${karten(state.cards.length)}${goal} in ${secs < 90 ? secs + ' s' : Math.round(secs / 6) / 10 + ' min'}.`;
   if (fixed) msg.textContent += ` ${fixed} ${fixed === 1 ? 'Karte' : 'Karten'} bei der Prüfung korrigiert (markiert).`;
   const parted = new Set(state.cards.filter(c => c.split >= started).map(c => c.splitOf)).size;
@@ -2297,10 +2314,10 @@ async function runCoverageJob(job, opts) {
     const look = reviewSlides(g, inGroup);
     const blobs = await Promise.all(look.map(u => claudeSlide(u.fileId, u.num)));
     const seen = look.map(u => u.num).filter((n, i) => blobs[i]), images = blobs.filter(Boolean);
-    // A compact deck gets few additions: 15 % of its budget ("Kompakt"), 10 % ("Sehr kompakt"), and only as far as the
-    // budget (with its 20 % leeway) has room.
+    // A budgeted deck gets few additions: 20 % of its budget ("Ausgewogen"), 15 % ("Kompakt"), 10 % ("Sehr kompakt"),
+    // and only as far as the budget (with its 20 % leeway) has room.
     const budget = cardRange(g.units, o)[0], room = budget + Math.floor(budget * 0.2) - inGroup.filter(counted).length;
-    const addMax = compact(o) ? Math.min(Math.round(budget * (o.density === 'kompakt' ? 0.15 : 0.1)), Math.max(0, room)) : Infinity;
+    const addMax = budgeted(o) ? Math.min(Math.round(budget * ({ ausgewogen: 0.2, kompakt: 0.15 }[o.density] || 0.1)), Math.max(0, room)) : Infinity;
     await streamItems(coveragePrompt(g, inGroup, o, { seen, findings: reviewFindings(g, inGroup, o, seen), addMax }), {
       tier: o.tier, effort: o.tier === 'complex' ? EFFORT.coverageCareful : EFFORT.coverage, signal: cardCtl.signal, images: images.length ? images : undefined,
       onItem: r => {
